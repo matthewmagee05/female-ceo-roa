@@ -1,0 +1,354 @@
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Female CEO and ROA Analysis</title>
+        <style>
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                margin: 40px;
+                background-color: #f8f9fa;
+                color: #333;
+            }
+            .container {
+                max-width: 1000px;
+                margin: 0 auto;
+                background: white;
+                padding: 30px;
+                border-radius: 10px;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            }
+            h1 {
+                color: #2c3e50;
+                text-align: center;
+                margin-bottom: 10px;
+                font-size: 28px;
+            }
+            .subtitle {
+                text-align: center;
+                color: #7f8c8d;
+                margin-bottom: 30px;
+                font-size: 16px;
+            }
+            .stats-summary {
+                background: #ecf0f1;
+                padding: 20px;
+                border-radius: 8px;
+                margin-bottom: 30px;
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 15px;
+            }
+            .stat-item {
+                text-align: center;
+            }
+            .stat-value {
+                font-size: 24px;
+                font-weight: bold;
+                color: #2c3e50;
+            }
+            .stat-label {
+                font-size: 14px;
+                color: #7f8c8d;
+                margin-top: 5px;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin: 20px 0;
+                background: white;
+                border-radius: 8px;
+                overflow: hidden;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            th {
+                background: #34495e;
+                color: white;
+                padding: 15px 12px;
+                text-align: left;
+                font-weight: 600;
+                font-size: 14px;
+            }
+            td {
+                padding: 12px;
+                border-bottom: 1px solid #ecf0f1;
+                font-size: 14px;
+            }
+            tr:nth-child(even) {
+                background-color: #f8f9fa;
+            }
+            tr:hover {
+                background-color: #e8f4f8;
+            }
+            .coefficient {
+                font-weight: bold;
+                color: #2c3e50;
+            }
+            .standard-error {
+                color: #7f8c8d;
+                font-size: 12px;
+                font-style: italic;
+            }
+            .section-header {
+                background: #3498db;
+                color: white;
+                font-weight: bold;
+                text-align: center;
+                padding: 10px;
+                margin: 20px 0 10px 0;
+                border-radius: 5px;
+            }
+            .notes {
+                margin-top: 30px;
+                padding: 20px;
+                background: #f8f9fa;
+                border-left: 4px solid #3498db;
+                border-radius: 0 5px 5px 0;
+            }
+            .notes h3 {
+                margin-top: 0;
+                color: #2c3e50;
+            }
+            .notes ul {
+                margin: 10px 0;
+                padding-left: 20px;
+            }
+            .notes li {
+                margin: 5px 0;
+                color: #555;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Female CEO and Return on Assets Analysis</h1>
+            <div class="subtitle">S&P 1500 Firms (2000-2010) - OLS Regression with Board Controls and Fixed Effects</div>
+            
+            <div class="stats-summary">
+                <div class="stat-item">
+                    <div class="stat-value">331</div>
+                    <div class="stat-label">Observations</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">0.245</div>
+                    <div class="stat-label">R-squared</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">0.194</div>
+                    <div class="stat-label">Adj. R-squared</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">3.75</div>
+                    <div class="stat-label">F-statistic</div>
+                </div>
+            </div>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Variable</th>
+                        <th>Coefficient</th>
+                        <th>Standard Error</th>
+                        <th>P-value</th>
+                        <th>95% Confidence Interval</th>
+                    </tr>
+                </thead>
+                <tbody>
+    <tr><td colspan="5" class="section-header">Main Variables</td></tr>
+                    <tr>
+                        <td><strong>Constant</strong></td>
+                        <td class="coefficient">-0.1756</td>
+                        <td class="standard-error">(0.1404)</td>
+                        <td>0.211</td>
+                        <td>[-0.451, 0.100]</td>
+                    </tr>
+            
+                    <tr>
+                        <td><strong>Female CEO</strong></td>
+                        <td class="coefficient">-0.0314</td>
+                        <td class="standard-error">(0.0264)</td>
+                        <td>0.234</td>
+                        <td>[-0.083, 0.020]</td>
+                    </tr>
+            
+                    <tr>
+                        <td><strong>Log Assets</strong></td>
+                        <td class="coefficient">0.0310***</td>
+                        <td class="standard-error">(0.0117)</td>
+                        <td>0.008</td>
+                        <td>[0.008, 0.054]</td>
+                    </tr>
+            
+                    <tr>
+                        <td><strong>Leverage</strong></td>
+                        <td class="coefficient">-0.3256**</td>
+                        <td class="standard-error">(0.1321)</td>
+                        <td>0.014</td>
+                        <td>[-0.584, -0.067]</td>
+                    </tr>
+            
+                    <tr>
+                        <td><strong>Board Size</strong></td>
+                        <td class="coefficient">-0.0100</td>
+                        <td class="standard-error">(0.0131)</td>
+                        <td>0.447</td>
+                        <td>[-0.036, 0.016]</td>
+                    </tr>
+            
+                    <tr>
+                        <td><strong>CEO Tenure</strong></td>
+                        <td class="coefficient">0.0028**</td>
+                        <td class="standard-error">(0.0013)</td>
+                        <td>0.028</td>
+                        <td>[0.000, 0.005]</td>
+                    </tr>
+            <tr><td colspan="5" class="section-header">Industry Fixed Effects (SIC 1-digit)</td></tr>
+                    <tr>
+                        <td>SIC 3 (Manufacturing)</td>
+                        <td class="coefficient">-0.0750***</td>
+                        <td class="standard-error">(0.0262)</td>
+                        <td>0.004</td>
+                        <td>[-0.126, -0.024]</td>
+                    </tr>
+            
+                    <tr>
+                        <td>SIC 4 (Transportation)</td>
+                        <td class="coefficient">-0.0923**</td>
+                        <td class="standard-error">(0.0452)</td>
+                        <td>0.041</td>
+                        <td>[-0.181, -0.004]</td>
+                    </tr>
+            
+                    <tr>
+                        <td>SIC 5 (Trade)</td>
+                        <td class="coefficient">-0.0075</td>
+                        <td class="standard-error">(0.0272)</td>
+                        <td>0.784</td>
+                        <td>[-0.061, 0.046]</td>
+                    </tr>
+            
+                    <tr>
+                        <td>SIC 6 (Finance)</td>
+                        <td class="coefficient">-0.1257***</td>
+                        <td class="standard-error">(0.0378)</td>
+                        <td>0.001</td>
+                        <td>[-0.200, -0.052]</td>
+                    </tr>
+            
+                    <tr>
+                        <td>SIC 7 (Services)</td>
+                        <td class="coefficient">0.0185</td>
+                        <td class="standard-error">(0.0376)</td>
+                        <td>0.621</td>
+                        <td>[-0.055, 0.092]</td>
+                    </tr>
+            
+                    <tr>
+                        <td>SIC 9 (Government)</td>
+                        <td class="coefficient">-0.1051**</td>
+                        <td class="standard-error">(0.0457)</td>
+                        <td>0.021</td>
+                        <td>[-0.195, -0.016]</td>
+                    </tr>
+            <tr><td colspan="5" class="section-header">Year Fixed Effects</td></tr>
+                    <tr>
+                        <td>Year 2001</td>
+                        <td class="coefficient">0.0317</td>
+                        <td class="standard-error">(0.0684)</td>
+                        <td>0.643</td>
+                        <td>[-0.102, 0.166]</td>
+                    </tr>
+            
+                    <tr>
+                        <td>Year 2002</td>
+                        <td class="coefficient">-0.0043</td>
+                        <td class="standard-error">(0.0759)</td>
+                        <td>0.955</td>
+                        <td>[-0.153, 0.145]</td>
+                    </tr>
+            
+                    <tr>
+                        <td>Year 2003</td>
+                        <td class="coefficient">0.0763</td>
+                        <td class="standard-error">(0.0660)</td>
+                        <td>0.247</td>
+                        <td>[-0.053, 0.206]</td>
+                    </tr>
+            
+                    <tr>
+                        <td>Year 2004</td>
+                        <td class="coefficient">0.0518</td>
+                        <td class="standard-error">(0.0652)</td>
+                        <td>0.428</td>
+                        <td>[-0.076, 0.180]</td>
+                    </tr>
+            
+                    <tr>
+                        <td>Year 2005</td>
+                        <td class="coefficient">0.0796</td>
+                        <td class="standard-error">(0.0650)</td>
+                        <td>0.221</td>
+                        <td>[-0.048, 0.207]</td>
+                    </tr>
+            
+                    <tr>
+                        <td>Year 2006</td>
+                        <td class="coefficient">0.0710</td>
+                        <td class="standard-error">(0.0652)</td>
+                        <td>0.276</td>
+                        <td>[-0.057, 0.199]</td>
+                    </tr>
+            
+                    <tr>
+                        <td>Year 2007</td>
+                        <td class="coefficient">0.0455</td>
+                        <td class="standard-error">(0.0657)</td>
+                        <td>0.489</td>
+                        <td>[-0.083, 0.174]</td>
+                    </tr>
+            
+                    <tr>
+                        <td>Year 2008</td>
+                        <td class="coefficient">0.0774</td>
+                        <td class="standard-error">(0.0654)</td>
+                        <td>0.236</td>
+                        <td>[-0.051, 0.206]</td>
+                    </tr>
+            
+                    <tr>
+                        <td>Year 2009</td>
+                        <td class="coefficient">0.0671</td>
+                        <td class="standard-error">(0.0648)</td>
+                        <td>0.301</td>
+                        <td>[-0.060, 0.194]</td>
+                    </tr>
+            
+                    <tr>
+                        <td>Year 2010</td>
+                        <td class="coefficient">0.1010</td>
+                        <td class="standard-error">(0.0644)</td>
+                        <td>0.117</td>
+                        <td>[-0.025, 0.227]</td>
+                    </tr>
+            
+                </tbody>
+            </table>
+            
+            <div class="notes">
+                <h3>Notes:</h3>
+                <ul>
+                    <li><strong>Dependent Variable:</strong> Return on Assets (ROA)</li>
+                    <li><strong>Standard Errors:</strong> Heteroscedasticity-robust (HC3)</li>
+                    <li><strong>Significance Levels:</strong> * p&lt;0.1, ** p&lt;0.05, *** p&lt;0.01</li>
+                    <li><strong>Sample:</strong> S&P 1500 firms (2000-2010) with complete data</li>
+                    <li><strong>Controls:</strong> Log Assets, Leverage, Board Size, Board Nationality Mix, Board Gender Ratio, CEO Tenure</li>
+                    <li><strong>Industry Controls:</strong> 1-digit SIC industry fixed effects</li>
+                    <li><strong>Time Controls:</strong> Year fixed effects (2000-2010)</li>
+                    <li><strong>Data Sources:</strong> Compustat, ExecuComp, BoardEx via WRDS</li>
+                </ul>
+            </div>
+        </div>
+    </body>
+    </html>
+    

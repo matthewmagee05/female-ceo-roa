@@ -1,0 +1,18 @@
+# Core data handling
+pandas>=2.0.0
+numpy>=1.25.0
+
+# WRDS access
+wrds>=3.1.6
+psycopg2-binary>=2.9.9
+
+# Stats + regression
+statsmodels>=0.14.0
+
+# File formats
+pyreadstat>=1.2.0   # for Stata export
+openpyxl>=3.1.2     # for Excel read/write
+pyarrow>=15.0.0     # for Parquet support
+
+# Env loader
+python-dotenv>=1.0.0
