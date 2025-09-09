@@ -110,22 +110,34 @@ def try_wrds_pull():
                                   coerce_float=True)  # No limit for production
         print(f"DEBUG: Pulled {len(security)} rows from comp.security")
 
-        # ExecuComp (in comp_execucomp library)
+        # ExecuComp (try comp_execucomp first, fallback to execucomp)
         print("DEBUG: Pulling ExecuComp data...")
-        execu = conn.get_table('comp_execucomp', 'anncomp',
-                               columns=['gvkey','year','ceoann','gender','becameceo'],
-                               coerce_float=True)  # No limit for production
-        print(f"DEBUG: Pulled {len(execu)} rows from comp_execucomp.anncomp")
-
-        # BoardEx–Compustat link
-        print("DEBUG: Pulling BoardEx link data...")
         try:
-            link = conn.get_table('wrdsapps_plink_exec_boardex', 'exec_boardex_link',
-                                  columns=['execid', 'directorid', 'score'],
-                                  coerce_float=True)  # No limit for production
-            print(f"DEBUG: Pulled {len(link)} rows from exec_boardex_link")
+            execu = conn.get_table('comp_execucomp', 'anncomp',
+                                   columns=['gvkey','year','ceoann','gender','becameceo'],
+                                   coerce_float=True)  # No limit for production
+            print(f"DEBUG: Pulled {len(execu)} rows from comp_execucomp.anncomp")
         except Exception as e:
-            print(f"DEBUG: BoardEx link pull failed: {e}")
+            print(f"DEBUG: comp_execucomp.anncomp failed: {e}")
+            print("DEBUG: Trying fallback to execucomp.anncomp...")
+            try:
+                execu = conn.get_table('execucomp', 'anncomp',
+                                       columns=['gvkey','year','ceoann','gender','becameceo'],
+                                       coerce_float=True)  # No limit for production
+                print(f"DEBUG: Pulled {len(execu)} rows from execucomp.anncomp")
+            except Exception as e2:
+                print(f"DEBUG: execucomp.anncomp also failed: {e2}")
+                execu = pd.DataFrame()
+
+        # BoardEx–Compustat link (correct table for firm mapping)
+        print("DEBUG: Pulling BoardEx-Compustat link data...")
+        try:
+            link = conn.get_table('wrdsapps', 'boardex_compustat_link',
+                                  columns=['companyid', 'gvkey', 'linkdt', 'linkenddt'],
+                                  coerce_float=True)  # No limit for production
+            print(f"DEBUG: Pulled {len(link)} rows from boardex_compustat_link")
+        except Exception as e:
+            print(f"DEBUG: BoardEx-Compustat link pull failed: {e}")
             link = pd.DataFrame()
 
         # BoardEx company-level board characteristics
@@ -150,18 +162,22 @@ def try_wrds_pull():
             print(f"DEBUG: BoardEx company profile stocks pull failed: {e}")
             bx_stocks = pd.DataFrame()
 
-        # S&P 1500 membership (using proper idxcst_his table)
+        # S&P 1500 membership (S&P 500 + S&P MidCap 400 + S&P SmallCap 600)
         print("DEBUG: Pulling S&P 1500 membership data...")
         try:
-            # Get S&P 1500 membership from idxcst_his (quote column names to handle reserved words)
+            # Get S&P 1500 membership from idxcst_his with index names
             sp1500 = conn.get_table('comp', 'idxcst_his',
-                                    columns=['gvkey', '"from"', '"thru"'],
+                                    columns=['gvkey', 'indexid', 'indexname', '"from"', '"thru"'],
                                     coerce_float=True)  # No limit for production
             print(f"DEBUG: Pulled {len(sp1500)} rows from idxcst_his")
             
-            # For now, use all idxcst_his data as S&P 1500 proxy (since we can't filter by index type)
+            # Filter to actual S&P 1500 indices
             if not sp1500.empty:
-                print(f"DEBUG: Using all idxcst_his data as S&P 1500 proxy: {len(sp1500)} rows")
+                # Filter to S&P 500, S&P MidCap 400, and S&P SmallCap 600
+                sp_indices = ['S&P 500', 'S&P MidCap 400', 'S&P SmallCap 600']
+                sp1500 = sp1500[sp1500['indexname'].isin(sp_indices)]
+                print(f"DEBUG: After filtering to S&P 1500 indices: {len(sp1500)} rows")
+                print(f"DEBUG: Index distribution: {sp1500['indexname'].value_counts().to_dict()}")
                 
         except Exception as e:
             print(f"DEBUG: S&P 1500 membership pull failed: {e}")
@@ -308,7 +324,7 @@ def coalesce_sources(wrds_dict):
 
 
 def build_and_merge(comp, execu, link, bx, bx_stocks, security):
-    """Merge Compustat + ExecuComp + BoardEx via ticker symbols."""
+    """Merge Compustat + ExecuComp + BoardEx via proper link table."""
     comp = comp.copy()
     # ExecuComp normalization
     execu = execu.copy()
@@ -340,69 +356,85 @@ def build_and_merge(comp, execu, link, bx, bx_stocks, security):
         df = comp.copy()
         warnings.warn("ExecuComp did not have compatible gvkey/fyear; skipping firm-year merge with ExecuComp.")
 
-    # Attach BoardEx data via ticker symbols (preserve year information)
-    if not bx.empty and not bx_stocks.empty and not security.empty:
-        print("DEBUG: Attempting BoardEx merge via ticker symbols...")
+    # Attach BoardEx data via proper link table (year-varying)
+    if not bx.empty and not link.empty:
+        print("DEBUG: Attempting BoardEx merge via link table...")
         
-        # First, merge BoardEx characteristics with BoardEx stocks to get ticker
-        bx_merged = bx.merge(bx_stocks, on='boardid', how='inner')
-        print(f"DEBUG: BoardEx merged with stocks: {len(bx_merged)} rows")
-        
-        # Harmonize common BoardEx columns
+        # Harmonize BoardEx columns
         ren = {}
-        if 'nationalitymix' in bx_merged.columns: ren['nationalitymix'] = 'nationality_mix'
-        if 'genderratio' in bx_merged.columns: ren['genderratio'] = 'gender_ratio'
-        if 'numberdirectors' in bx_merged.columns: ren['numberdirectors'] = 'board_size'
-        bx_merged.rename(columns=ren, inplace=True)
+        if 'nationalitymix' in bx.columns: ren['nationalitymix'] = 'nationality_mix'
+        if 'genderratio' in bx.columns: ren['genderratio'] = 'gender_ratio'
+        if 'numberdirectors' in bx.columns: ren['numberdirectors'] = 'board_size'
+        bx.rename(columns=ren, inplace=True)
         
-        # Get primary ticker for each boardid (prefer primarystock=1)
-        if 'primarystock' in bx_merged.columns:
-            bx_primary = bx_merged[bx_merged['primarystock'] == 1].copy()
-            if not bx_primary.empty:
-                bx_merged = bx_primary
+        # Convert dates in link table
+        link['linkdt'] = pd.to_datetime(link['linkdt'], errors='coerce')
+        link['linkenddt'] = pd.to_datetime(link['linkenddt'], errors='coerce')
+        
+        # Convert BoardEx report date
+        if 'annualreportdate' in bx.columns:
+            bx['annualreportdate'] = pd.to_datetime(bx['annualreportdate'], errors='coerce')
+            bx['report_year'] = bx['annualreportdate'].dt.year
+        
+        print(f"DEBUG: BoardEx characteristics: {len(bx)} rows")
+        print(f"DEBUG: BoardEx link table: {len(link)} rows")
+        
+        # Merge BoardEx characteristics with link table
+        bx_with_link = bx.merge(link, on='companyid', how='inner')
+        print(f"DEBUG: BoardEx with link: {len(bx_with_link)} rows")
+        
+        # Create year-varying BoardEx data
+        bx_year_varying = []
+        
+        for _, row in bx_with_link.iterrows():
+            gvkey = row['gvkey']
+            link_start = row['linkdt']
+            link_end = row['linkenddt']
+            report_year = row.get('report_year', None)
+            
+            # Determine valid years for this BoardEx observation
+            if pd.notna(link_start) and pd.notna(link_end):
+                # Use link date window
+                start_year = link_start.year
+                end_year = link_end.year
+            elif pd.notna(report_year):
+                # Use report year ± 1 year
+                start_year = report_year - 1
+                end_year = report_year + 1
             else:
-                # If no primary stock, take first ticker for each boardid
-                bx_merged = bx_merged.drop_duplicates('boardid', keep='first')
+                # Skip if no valid dates
+                continue
+            
+            # Create firm-year observations for this BoardEx data
+            for year in range(start_year, end_year + 1):
+                bx_year_varying.append({
+                    'gvkey': gvkey,
+                    'fyear': year,
+                    'board_size': row.get('board_size'),
+                    'nationality_mix': row.get('nationality_mix'),
+                    'gender_ratio': row.get('gender_ratio')
+                })
+        
+        if bx_year_varying:
+            bx_df = pd.DataFrame(bx_year_varying)
+            print(f"DEBUG: BoardEx year-varying data: {len(bx_df)} firm-year observations")
+            
+            # Merge with main dataset
+            df = df.merge(bx_df, on=['gvkey', 'fyear'], how='left', suffixes=('', '_bx'))
+            print(f"DEBUG: After BoardEx merge: {len(df)} rows")
+            print(f"DEBUG: BoardEx coverage: {df['board_size'].notna().sum()} firm-years")
         else:
-            bx_merged = bx_merged.drop_duplicates('boardid', keep='first')
-        
-        print(f"DEBUG: BoardEx after primary ticker selection: {len(bx_merged)} rows")
-        print(f"DEBUG: BoardEx ticker sample: {bx_merged[['boardid', 'ticker', 'board_size']].head()}")
-        
-        # Merge with Compustat security to get gvkey
-        bx_with_gvkey = bx_merged.merge(security[['gvkey', 'tic']], left_on='ticker', right_on='tic', how='inner')
-        print(f"DEBUG: BoardEx merged with Compustat security: {len(bx_with_gvkey)} rows")
-        
-        # Create BoardEx data at gvkey level (without year, so it applies to all years)
-        bx_gvkey = bx_with_gvkey.groupby('gvkey').agg({
-            'board_size': 'first',
-            'nationality_mix': 'first', 
-            'gender_ratio': 'first'
-        }).reset_index()
-        
-        print(f"DEBUG: BoardEx data aggregated by gvkey: {len(bx_gvkey)} rows")
-        
-        # Merge with main dataset (this will create the BoardEx variables for all firm-years)
-        bx_cols = ['gvkey', 'board_size', 'nationality_mix', 'gender_ratio']
-        bx_cols = [c for c in bx_cols if c in bx_gvkey.columns]
-        
-        if bx_cols:
-            df = df.merge(bx_gvkey[bx_cols], on='gvkey', how='left', suffixes=('', '_bx'))
-            print(f"DEBUG: BoardEx data merged with main dataset")
-            print(f"DEBUG: BoardEx variables after merge:")
-            for col in ['board_size', 'nationality_mix', 'gender_ratio']:
-                if col in df.columns:
-                    non_null = df[col].notna().sum()
-                    print(f"DEBUG: {col}: {non_null} non-null values out of {len(df)}")
-        else:
-            print("DEBUG: No BoardEx columns available for merge")
+            print("DEBUG: No valid BoardEx year-varying data created")
+            # Create placeholder columns
+            df['board_size'] = pd.NA
+            df['nationality_mix'] = pd.NA
+            df['gender_ratio'] = pd.NA
     else:
-        print("DEBUG: BoardEx data not available for ticker-based merge")
-    
-    # Create placeholders for any missing BoardEx variables
-    for c in ['board_size','nationality_mix','gender_ratio']:
-        if c not in df.columns:
-            df[c] = pd.NA
+        print("DEBUG: BoardEx merge skipped - missing data")
+        # Create placeholder columns
+        df['board_size'] = pd.NA
+        df['nationality_mix'] = pd.NA
+        df['gender_ratio'] = pd.NA
 
     return df
 
