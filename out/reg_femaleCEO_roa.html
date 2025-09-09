@@ -127,19 +127,19 @@
             
             <div class="stats-summary">
                 <div class="stat-item">
-                    <div class="stat-value">331</div>
+                    <div class="stat-value">7,172</div>
                     <div class="stat-label">Observations</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-value">0.245</div>
+                    <div class="stat-value">0.067</div>
                     <div class="stat-label">R-squared</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-value">0.194</div>
+                    <div class="stat-value">0.064</div>
                     <div class="stat-label">Adj. R-squared</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-value">3.75</div>
+                    <div class="stat-value">45.99</div>
                     <div class="stat-label">F-statistic</div>
                 </div>
             </div>
@@ -158,178 +158,186 @@
     <tr><td colspan="5" class="section-header">Main Variables</td></tr>
                     <tr>
                         <td><strong>Constant</strong></td>
-                        <td class="coefficient">-0.1756</td>
-                        <td class="standard-error">(0.1404)</td>
-                        <td>0.211</td>
-                        <td>[-0.451, 0.100]</td>
+                        <td class="coefficient">0.0805***</td>
+                        <td class="standard-error">(0.0142)</td>
+                        <td>0.000</td>
+                        <td>[0.053, 0.108]</td>
                     </tr>
             
                     <tr>
                         <td><strong>Female CEO</strong></td>
-                        <td class="coefficient">-0.0314</td>
-                        <td class="standard-error">(0.0264)</td>
-                        <td>0.234</td>
-                        <td>[-0.083, 0.020]</td>
+                        <td class="coefficient">0.0022</td>
+                        <td class="standard-error">(0.0080)</td>
+                        <td>0.788</td>
+                        <td>[-0.014, 0.018]</td>
                     </tr>
             
                     <tr>
                         <td><strong>Log Assets</strong></td>
-                        <td class="coefficient">0.0310***</td>
-                        <td class="standard-error">(0.0117)</td>
-                        <td>0.008</td>
-                        <td>[0.008, 0.054]</td>
+                        <td class="coefficient">-0.0024*</td>
+                        <td class="standard-error">(0.0015)</td>
+                        <td>0.093</td>
+                        <td>[-0.005, 0.000]</td>
                     </tr>
             
                     <tr>
                         <td><strong>Leverage</strong></td>
-                        <td class="coefficient">-0.3256**</td>
-                        <td class="standard-error">(0.1321)</td>
-                        <td>0.014</td>
-                        <td>[-0.584, -0.067]</td>
-                    </tr>
-            
-                    <tr>
-                        <td><strong>Board Size</strong></td>
-                        <td class="coefficient">-0.0100</td>
-                        <td class="standard-error">(0.0131)</td>
-                        <td>0.447</td>
-                        <td>[-0.036, 0.016]</td>
+                        <td class="coefficient">-0.0624***</td>
+                        <td class="standard-error">(0.0123)</td>
+                        <td>0.000</td>
+                        <td>[-0.086, -0.038]</td>
                     </tr>
             
                     <tr>
                         <td><strong>CEO Tenure</strong></td>
-                        <td class="coefficient">0.0028**</td>
-                        <td class="standard-error">(0.0013)</td>
-                        <td>0.028</td>
-                        <td>[0.000, 0.005]</td>
+                        <td class="coefficient">0.0009***</td>
+                        <td class="standard-error">(0.0002)</td>
+                        <td>0.000</td>
+                        <td>[0.001, 0.001]</td>
                     </tr>
             <tr><td colspan="5" class="section-header">Industry Fixed Effects (SIC 1-digit)</td></tr>
                     <tr>
+                        <td>sic1_2</td>
+                        <td class="coefficient">0.0325***</td>
+                        <td class="standard-error">(0.0040)</td>
+                        <td>0.000</td>
+                        <td>[0.025, 0.040]</td>
+                    </tr>
+            
+                    <tr>
                         <td>SIC 3 (Manufacturing)</td>
-                        <td class="coefficient">-0.0750***</td>
-                        <td class="standard-error">(0.0262)</td>
-                        <td>0.004</td>
-                        <td>[-0.126, -0.024]</td>
+                        <td class="coefficient">-0.0120**</td>
+                        <td class="standard-error">(0.0049)</td>
+                        <td>0.015</td>
+                        <td>[-0.022, -0.002]</td>
                     </tr>
             
                     <tr>
                         <td>SIC 4 (Transportation)</td>
-                        <td class="coefficient">-0.0923**</td>
-                        <td class="standard-error">(0.0452)</td>
-                        <td>0.041</td>
-                        <td>[-0.181, -0.004]</td>
+                        <td class="coefficient">-0.0192***</td>
+                        <td class="standard-error">(0.0044)</td>
+                        <td>0.000</td>
+                        <td>[-0.028, -0.011]</td>
                     </tr>
             
                     <tr>
                         <td>SIC 5 (Trade)</td>
-                        <td class="coefficient">-0.0075</td>
-                        <td class="standard-error">(0.0272)</td>
-                        <td>0.784</td>
-                        <td>[-0.061, 0.046]</td>
+                        <td class="coefficient">0.0161***</td>
+                        <td class="standard-error">(0.0042)</td>
+                        <td>0.000</td>
+                        <td>[0.008, 0.024]</td>
                     </tr>
             
                     <tr>
                         <td>SIC 6 (Finance)</td>
-                        <td class="coefficient">-0.1257***</td>
-                        <td class="standard-error">(0.0378)</td>
-                        <td>0.001</td>
-                        <td>[-0.200, -0.052]</td>
+                        <td class="coefficient">-0.0232***</td>
+                        <td class="standard-error">(0.0045)</td>
+                        <td>0.000</td>
+                        <td>[-0.032, -0.014]</td>
                     </tr>
             
                     <tr>
                         <td>SIC 7 (Services)</td>
-                        <td class="coefficient">0.0185</td>
-                        <td class="standard-error">(0.0376)</td>
-                        <td>0.621</td>
-                        <td>[-0.055, 0.092]</td>
+                        <td class="coefficient">-0.0010</td>
+                        <td class="standard-error">(0.0073)</td>
+                        <td>0.895</td>
+                        <td>[-0.015, 0.013]</td>
+                    </tr>
+            
+                    <tr>
+                        <td>sic1_8</td>
+                        <td class="coefficient">0.0209**</td>
+                        <td class="standard-error">(0.0089)</td>
+                        <td>0.018</td>
+                        <td>[0.004, 0.038]</td>
                     </tr>
             
                     <tr>
                         <td>SIC 9 (Government)</td>
-                        <td class="coefficient">-0.1051**</td>
-                        <td class="standard-error">(0.0457)</td>
-                        <td>0.021</td>
-                        <td>[-0.195, -0.016]</td>
+                        <td class="coefficient">0.0254**</td>
+                        <td class="standard-error">(0.0116)</td>
+                        <td>0.029</td>
+                        <td>[0.003, 0.048]</td>
                     </tr>
             <tr><td colspan="5" class="section-header">Year Fixed Effects</td></tr>
                     <tr>
                         <td>Year 2001</td>
-                        <td class="coefficient">0.0317</td>
-                        <td class="standard-error">(0.0684)</td>
-                        <td>0.643</td>
-                        <td>[-0.102, 0.166]</td>
+                        <td class="coefficient">-0.0381***</td>
+                        <td class="standard-error">(0.0101)</td>
+                        <td>0.000</td>
+                        <td>[-0.058, -0.018]</td>
                     </tr>
             
                     <tr>
                         <td>Year 2002</td>
-                        <td class="coefficient">-0.0043</td>
-                        <td class="standard-error">(0.0759)</td>
-                        <td>0.955</td>
-                        <td>[-0.153, 0.145]</td>
+                        <td class="coefficient">-0.0461***</td>
+                        <td class="standard-error">(0.0078)</td>
+                        <td>0.000</td>
+                        <td>[-0.061, -0.031]</td>
                     </tr>
             
                     <tr>
                         <td>Year 2003</td>
-                        <td class="coefficient">0.0763</td>
-                        <td class="standard-error">(0.0660)</td>
-                        <td>0.247</td>
-                        <td>[-0.053, 0.206]</td>
+                        <td class="coefficient">-0.0062</td>
+                        <td class="standard-error">(0.0039)</td>
+                        <td>0.115</td>
+                        <td>[-0.014, 0.002]</td>
                     </tr>
             
                     <tr>
                         <td>Year 2004</td>
-                        <td class="coefficient">0.0518</td>
-                        <td class="standard-error">(0.0652)</td>
-                        <td>0.428</td>
-                        <td>[-0.076, 0.180]</td>
+                        <td class="coefficient">0.0025</td>
+                        <td class="standard-error">(0.0037)</td>
+                        <td>0.505</td>
+                        <td>[-0.005, 0.010]</td>
                     </tr>
             
                     <tr>
                         <td>Year 2005</td>
-                        <td class="coefficient">0.0796</td>
-                        <td class="standard-error">(0.0650)</td>
-                        <td>0.221</td>
-                        <td>[-0.048, 0.207]</td>
+                        <td class="coefficient">0.0112***</td>
+                        <td class="standard-error">(0.0039)</td>
+                        <td>0.004</td>
+                        <td>[0.003, 0.019]</td>
                     </tr>
             
                     <tr>
                         <td>Year 2006</td>
-                        <td class="coefficient">0.0710</td>
-                        <td class="standard-error">(0.0652)</td>
-                        <td>0.276</td>
-                        <td>[-0.057, 0.199]</td>
+                        <td class="coefficient">0.0169***</td>
+                        <td class="standard-error">(0.0037)</td>
+                        <td>0.000</td>
+                        <td>[0.010, 0.024]</td>
                     </tr>
             
                     <tr>
                         <td>Year 2007</td>
-                        <td class="coefficient">0.0455</td>
-                        <td class="standard-error">(0.0657)</td>
-                        <td>0.489</td>
-                        <td>[-0.083, 0.174]</td>
+                        <td class="coefficient">0.0120***</td>
+                        <td class="standard-error">(0.0042)</td>
+                        <td>0.005</td>
+                        <td>[0.004, 0.020]</td>
                     </tr>
             
                     <tr>
                         <td>Year 2008</td>
-                        <td class="coefficient">0.0774</td>
-                        <td class="standard-error">(0.0654)</td>
-                        <td>0.236</td>
-                        <td>[-0.051, 0.206]</td>
+                        <td class="coefficient">-0.0117**</td>
+                        <td class="standard-error">(0.0054)</td>
+                        <td>0.032</td>
+                        <td>[-0.022, -0.001]</td>
                     </tr>
             
                     <tr>
                         <td>Year 2009</td>
-                        <td class="coefficient">0.0671</td>
-                        <td class="standard-error">(0.0648)</td>
-                        <td>0.301</td>
-                        <td>[-0.060, 0.194]</td>
+                        <td class="coefficient">-0.0027</td>
+                        <td class="standard-error">(0.0040)</td>
+                        <td>0.501</td>
+                        <td>[-0.010, 0.005]</td>
                     </tr>
             
                     <tr>
                         <td>Year 2010</td>
-                        <td class="coefficient">0.1010</td>
-                        <td class="standard-error">(0.0644)</td>
-                        <td>0.117</td>
-                        <td>[-0.025, 0.227]</td>
+                        <td class="coefficient">0.0151***</td>
+                        <td class="standard-error">(0.0035)</td>
+                        <td>0.000</td>
+                        <td>[0.008, 0.022]</td>
                     </tr>
             
                 </tbody>
