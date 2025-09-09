@@ -93,28 +93,28 @@ def try_wrds_pull():
         print("DEBUG: Pulling Compustat funda data...")
         comp = conn.get_table('comp', 'funda',
                               columns=['gvkey','datadate','fyear','ni','at','dltt'],
-                              obs=10000, coerce_float=True)  # Limit to 10k rows for testing
+                              coerce_float=True)  # No limit for production
         print(f"DEBUG: Pulled {len(comp)} rows from comp.funda")
 
         # Compustat company (for SIC if funda lacks it)
         print("DEBUG: Pulling Compustat company data...")
         company = conn.get_table('comp', 'company',
                                  columns=['gvkey','sic'],
-                                 obs=5000, coerce_float=True)  # Limit for testing
+                                 coerce_float=True)  # No limit for production
         print(f"DEBUG: Pulled {len(company)} rows from comp.company")
 
         # Compustat security (for ticker symbols to link with BoardEx)
         print("DEBUG: Pulling Compustat security data...")
         security = conn.get_table('comp', 'security',
                                   columns=['gvkey','tic','iid'],
-                                  obs=5000, coerce_float=True)  # Limit for testing
+                                  coerce_float=True)  # No limit for production
         print(f"DEBUG: Pulled {len(security)} rows from comp.security")
 
         # ExecuComp (in comp_execucomp library)
         print("DEBUG: Pulling ExecuComp data...")
         execu = conn.get_table('comp_execucomp', 'anncomp',
                                columns=['gvkey','year','ceoann','gender','becameceo'],
-                               obs=5000, coerce_float=True)  # Limit for testing
+                               coerce_float=True)  # No limit for production
         print(f"DEBUG: Pulled {len(execu)} rows from comp_execucomp.anncomp")
 
         # BoardEx–Compustat link
@@ -122,7 +122,7 @@ def try_wrds_pull():
         try:
             link = conn.get_table('wrdsapps_plink_exec_boardex', 'exec_boardex_link',
                                   columns=['execid', 'directorid', 'score'],
-                                  obs=10000, coerce_float=True)
+                                  coerce_float=True)  # No limit for production
             print(f"DEBUG: Pulled {len(link)} rows from exec_boardex_link")
         except Exception as e:
             print(f"DEBUG: BoardEx link pull failed: {e}")
@@ -133,7 +133,7 @@ def try_wrds_pull():
         try:
             bx = conn.get_table('boardex_na', 'na_board_characteristics',
                                 columns=['boardid', 'numberdirectors', 'nationalitymix', 'genderratio', 'annualreportdate'],
-                                obs=5000, coerce_float=True)
+                                coerce_float=True)  # No limit for production
             print(f"DEBUG: Pulled {len(bx)} rows from na_board_characteristics")
         except Exception as e:
             print(f"DEBUG: BoardEx board characteristics pull failed: {e}")
@@ -144,7 +144,7 @@ def try_wrds_pull():
         try:
             bx_stocks = conn.get_table('boardex_na', 'na_company_profile_stocks',
                                       columns=['boardid', 'ticker', 'primarystock'],
-                                      obs=5000, coerce_float=True)
+                                      coerce_float=True)  # No limit for production
             print(f"DEBUG: Pulled {len(bx_stocks)} rows from na_company_profile_stocks")
         except Exception as e:
             print(f"DEBUG: BoardEx company profile stocks pull failed: {e}")
@@ -156,7 +156,7 @@ def try_wrds_pull():
             # Get S&P 1500 membership from idxcst_his (quote column names to handle reserved words)
             sp1500 = conn.get_table('comp', 'idxcst_his',
                                     columns=['gvkey', '"from"', '"thru"'],
-                                    obs=10000, coerce_float=True)
+                                    coerce_float=True)  # No limit for production
             print(f"DEBUG: Pulled {len(sp1500)} rows from idxcst_his")
             
             # For now, use all idxcst_his data as S&P 1500 proxy (since we can't filter by index type)
@@ -170,13 +170,13 @@ def try_wrds_pull():
                 print("DEBUG: Trying S&P 500 fallback...")
                 sp500 = conn.get_table('crsp_a_indexes', 'dsp500list',
                                        columns=['permno', 'start', 'ending'],
-                                       obs=5000, coerce_float=True)
+                                       coerce_float=True)  # No limit for production
                 print(f"DEBUG: Pulled {len(sp500)} rows from dsp500list")
                 
                 # Get CRSP-Compustat link table
                 link_table = conn.get_table('crsp_a_ccm', 'ccmxpf_linktable',
                                             columns=['gvkey', 'lpermno', 'linkdt', 'linkenddt'],
-                                            obs=10000, coerce_float=True)
+                                            coerce_float=True)  # No limit for production
                 print(f"DEBUG: Pulled {len(link_table)} rows from ccmxpf_linktable")
                 
                 # Merge to get gvkey for S&P 500 firms
@@ -874,6 +874,38 @@ def create_pretty_html_table(model, data):
     return html
 
 
+def data_quality_diagnostics(df):
+    """Print comprehensive data quality diagnostics."""
+    print(f"\n🔍 DATA QUALITY DIAGNOSTICS")
+    print(f"=" * 50)
+    print(f"Total observations: {len(df)}")
+    
+    # Check key variables
+    key_vars = ['roa', 'female_ceo', 'ln_assets', 'leverage', 'ceo_tenure', 
+                'board_size', 'nationality_mix', 'gender_ratio']
+    
+    for var in key_vars:
+        if var in df.columns:
+            non_null = df[var].notna().sum()
+            pct = (non_null / len(df)) * 100
+            print(f"{var:15}: {non_null:4d}/{len(df)} ({pct:5.1f}%)")
+            
+            if var == 'female_ceo' and non_null > 0:
+                female_count = (df[var] == 1).sum()
+                print(f"{'':15}  Female CEOs: {female_count} ({female_count/non_null*100:.1f}%)")
+        else:
+            print(f"{var:15}: NOT FOUND")
+    
+    # SIC1 distribution
+    if 'sic1' in df.columns:
+        print(f"\nSIC1 Distribution:")
+        sic_counts = df['sic1'].value_counts().head(10)
+        for sic, count in sic_counts.items():
+            pct = (count / len(df)) * 100
+            print(f"  SIC1 {sic}: {count} ({pct:.1f}%)")
+    
+    print(f"=" * 50)
+
 def run_regression(df):
     """Run OLS with HC3 SEs and save outputs."""
     # Core required columns (flexible about BoardEx data and ceo_tenure)
@@ -944,6 +976,8 @@ def run_regression(df):
     
     print(f"DEBUG: Using variables: {available_vars}")
     X_core = use[available_vars].copy()
+    # Industry FE: drop_first=True drops the first SIC1 category as reference
+    # This will be SIC1=0 or the first alphabetical category (likely SIC1=1)
     sic_dum = pd.get_dummies(use['sic1'], prefix='sic1', drop_first=True)
     year_dum = pd.get_dummies(use['fyear'].astype(int), prefix='year', drop_first=True)
 
@@ -1089,7 +1123,10 @@ def main():
     # 3) Filter to S&P1500 (if provided) and 2000–2010
     df = apply_filters(df, sp1500)
 
-    # 4) Run regression
+    # 4) Data quality diagnostics
+    data_quality_diagnostics(df)
+
+    # 5) Run regression
     model, used_rows, X, y = run_regression(df)
     print(model.summary())
 
