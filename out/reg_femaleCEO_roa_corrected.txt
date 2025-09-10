@@ -1,0 +1,28 @@
+                                 OLS Regression Results                                
+=======================================================================================
+Dep. Variable:           roa_demeaned   R-squared (uncentered):                   0.021
+Model:                            OLS   Adj. R-squared (uncentered):              0.021
+Method:                 Least Squares   F-statistic:                              13.97
+Date:                Tue, 09 Sep 2025   Prob (F-statistic):                    3.19e-11
+Time:                        20:24:04   Log-Likelihood:                          14404.
+No. Observations:               12448   AIC:                                 -2.880e+04
+Df Residuals:                   12444   BIC:                                 -2.877e+04
+Df Model:                           4                                                  
+Covariance Type:              cluster                                                  
+=======================================================================================
+                          coef    std err          z      P>|z|      [0.025      0.975]
+---------------------------------------------------------------------------------------
+female_ceo_demeaned    -0.0186      0.014     -1.351      0.177      -0.046       0.008
+size_demeaned           0.0051      0.003      1.754      0.079      -0.001       0.011
+leverage_demeaned      -0.1151      0.016     -7.257      0.000      -0.146      -0.084
+ceo_tenure_demeaned  9.339e-05      0.000      0.469      0.639      -0.000       0.000
+==============================================================================
+Omnibus:                     6665.127   Durbin-Watson:                   1.875
+Prob(Omnibus):                  0.000   Jarque-Bera (JB):           124450.924
+Skew:                          -2.157   Prob(JB):                         0.00
+Kurtosis:                      17.877   Cond. No.                         44.5
+==============================================================================
+
+Notes:
+[1] R² is computed without centering (uncentered) since the model does not contain a constant.
+[2] Standard Errors are robust to cluster correlation (cluster)

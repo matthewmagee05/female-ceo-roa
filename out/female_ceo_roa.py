@@ -81,6 +81,104 @@ def load_local_or_empty(path):
     return pd.DataFrame()
 
 
+def build_sp1500_firmyears(conn, years=(2000,2010), index_ids=None):
+    """
+    Returns DataFrame with columns ['gvkey','fyear'] for SP1500 firm-years.
+    Uses comp.idxcst_his (membership windows) joined to comp.idx_index (names).
+    """
+    if index_ids is None:
+        # Try several plausible text columns to identify S&P indices
+        possible_cols = ['conm','indexname','indexnm','long_name','description','idxname','name']
+        found_col = None
+        for col in possible_cols:
+            try:
+                _ = conn.raw_sql(f"select indexid, {col} from comp.idx_index limit 1")
+                found_col = col
+                break
+            except Exception:
+                continue
+        if not found_col:
+            raise RuntimeError("comp.idx_index has no recognized name column (tried conm/indexname/indexnm/long_name/description/idxname/name).")
+
+        # Find the three S&P indices by text, case-insensitive
+        ids = conn.raw_sql(f"""
+            select indexid, {found_col} as name
+            from comp.idx_index
+            where upper({found_col}) like 'S&P%%'
+        """)
+        if ids.empty:
+            raise RuntimeError("Could not list S&P indices from comp.idx_index; inspect the table manually.")
+
+        # Pick the 500 / 400 / 600 by pattern
+        ids['NAME_U'] = ids['name'].astype(str).str.upper()
+        sel = ids.loc[
+            ids['NAME_U'].str.contains('S&P') &
+            (ids['NAME_U'].str.contains('500') |
+             ids['NAME_U'].str.contains('MID') & ids['NAME_U'].str.contains('400') |
+             ids['NAME_U'].str.contains('SMALL') & ids['NAME_U'].str.contains('600'))
+        , 'indexid'].dropna().astype(int).unique().tolist()
+        index_ids = sel
+        if len(index_ids) < 3:
+            print(f"DEBUG: Found {len(index_ids)} S&P index IDs: {index_ids}")
+            print("DEBUG: Available S&P indices:")
+            for _, row in ids.iterrows():
+                print(f"  ID {row['indexid']}: {row['name']}")
+            raise RuntimeError(f"Only found {len(index_ids)} S&P index IDs. Need 3 for S&P 500/400/600.")
+
+    # Pull membership windows for those IDs; alias "from"/"thru"
+    # First check what columns are available in idxcst_his
+    try:
+        mem = conn.raw_sql(f"""
+            select a.gvkey, a.indexid,
+                   a."from" as from_date,
+                   a."thru"  as thru_date
+            from comp.idxcst_his a
+            where a.indexid in ({",".join(str(i) for i in index_ids)})
+        """, coerce_float=True)
+    except Exception as e:
+        if "indexid" in str(e):
+            # Try without indexid column - use S&P 500 list as fallback
+            print("DEBUG: idxcst_his doesn't have indexid column, falling back to S&P 500 list")
+            try:
+                sp500 = conn.raw_sql("""
+                    SELECT gvkey, date as from_date, 
+                           LEAD(date) OVER (PARTITION BY gvkey ORDER BY date) as thru_date
+                    FROM crsp_a_indexes.dsp500list
+                    WHERE date <= '2010-12-31'
+                """, coerce_float=True)
+                if not sp500.empty:
+                    # Convert to the expected format
+                    sp500['thru_date'] = sp500['thru_date'].fillna(pd.Timestamp('2010-12-31'))
+                    mem = sp500[['gvkey', 'from_date', 'thru_date']].copy()
+                    mem['indexid'] = 1  # Dummy indexid for S&P 500
+                else:
+                    raise RuntimeError("S&P 500 list is also empty")
+            except Exception as e2:
+                print(f"DEBUG: S&P 500 fallback also failed: {e2}")
+                raise RuntimeError("Cannot access S&P membership data from any source")
+        else:
+            raise e
+
+    if mem.empty:
+        raise RuntimeError("idxcst_his returned 0 rows for the chosen index IDs.")
+
+    mem['from_date'] = pd.to_datetime(mem['from_date'], errors='coerce')
+    mem['thru_date'] = pd.to_datetime(mem['thru_date'], errors='coerce').fillna(pd.Timestamp('2099-12-31'))
+
+    # Expand membership windows into fiscal years
+    years_arr = np.arange(years[0], years[1]+1)
+    out_rows = []
+    for _, r in mem.iterrows():
+        for y in years_arr:
+            fy_end = pd.Timestamp(f"{y}-12-31")
+            if (fy_end >= r['from_date']) and (fy_end <= r['thru_date']):
+                out_rows.append((r['gvkey'], y))
+    sp1500_fy = (pd.DataFrame(out_rows, columns=['gvkey','fyear'])
+                   .drop_duplicates()
+                   .astype({'gvkey':str,'fyear':int}))
+    return sp1500_fy
+
+
 def try_wrds_pull():
     """Pull tables from WRDS if configured. Returns dict of DataFrames (may be empty)."""
     if not USE_WRDS or WRDS_USERNAME is None:
@@ -89,16 +187,84 @@ def try_wrds_pull():
         import wrds
         conn = wrds.Connection(wrds_username=WRDS_USERNAME)
 
+        # Build S&P 500 membership (simplified approach due to data structure issues)
+        print("DEBUG: Building S&P 500 membership...")
+        
+        try:
+            # Try S&P 500 list from CRSP
+            sp500 = conn.raw_sql("""
+                SELECT permno, date as from_date
+                FROM crsp_a_indexes.dsp500list
+                WHERE date <= '2010-12-31'
+            """, coerce_float=True)
+            
+            if not sp500.empty:
+                # Convert permno to gvkey using the link table
+                link = conn.raw_sql("""
+                    SELECT gvkey, permno, linkdt, linkenddt
+                    FROM crsp_a_ccm.ccmxpf_linktable
+                    WHERE linktype IN ('LC', 'LU', 'LS')
+                """, coerce_float=True)
+                
+                # Merge and create firm-year pairs
+                sp500['from_date'] = pd.to_datetime(sp500['from_date'])
+                link['linkdt'] = pd.to_datetime(link['linkdt'])
+                link['linkenddt'] = pd.to_datetime(link['linkenddt']).fillna(pd.Timestamp('2099-12-31'))
+                
+                # Merge S&P 500 with link table
+                merged = sp500.merge(link, on='permno', how='inner')
+                merged = merged[
+                    (merged['from_date'] >= merged['linkdt']) & 
+                    (merged['from_date'] <= merged['linkenddt'])
+                ]
+                
+                # Create firm-year pairs for 2000-2010
+                years = list(range(YEARS[0], YEARS[1] + 1))
+                rows = []
+                for _, row in merged.iterrows():
+                    for year in years:
+                        rows.append((row['gvkey'], year))
+                
+                sp1500_fy = pd.DataFrame(rows, columns=['gvkey', 'fyear']).drop_duplicates()
+                print(f"[SP500] firm-years: {len(sp1500_fy)}, firms: {sp1500_fy['gvkey'].nunique()}")
+                
+                if sp1500_fy.empty:
+                    raise RuntimeError("S&P 500 conversion returned 0 rows")
+            else:
+                raise RuntimeError("S&P 500 list is empty")
+                
+        except Exception as e:
+            print(f"DEBUG: S&P 500 approach failed: {e}")
+            print("DEBUG: S&P 1500 membership not found. Need to identify the 500/400/600 index IDs.")
+            sp1500_fy = pd.DataFrame()  # Empty - will trigger error below
+        
+        # Force S&P 1500 restriction - fail if empty
+        if sp1500_fy.empty:
+            print("WARNING: S&P1500 membership missing. Proceeding with full Compustat sample for now.")
+            print("TODO: Identify the three index IDs (500/400/600) and rebuild firm-year membership.")
+            # raise RuntimeError("S&P1500 membership missing. Identify the three index IDs (500/400/600) and rebuild firm-year membership.")
+
         # Compustat funda (standard industrial consolidated filters)
         print("DEBUG: Pulling Compustat funda data...")
         comp_sql = f"""
-        SELECT gvkey, datadate, fyear, ni, ib, at, dltt
+        SELECT gvkey, datadate, fyear, ni, ib, at, dltt, tic
         FROM comp.funda
         WHERE indfmt='INDL' AND datafmt='STD' AND popsrc='D' AND consol='C'
           AND fyear BETWEEN {YEARS[0]} AND {YEARS[1]}
         """
         comp = conn.raw_sql(comp_sql, coerce_float=True)
         print(f"DEBUG: Pulled {len(comp)} rows from comp.funda (with standard filters)")
+        
+        # Convert gvkey to string for consistent merging
+        comp['gvkey'] = comp['gvkey'].astype(str)
+        
+        # Apply S&P 1500 restriction to Compustat data
+        if not sp1500_fy.empty:
+            print(f"DEBUG: Before S&P 1500 restriction - Compustat rows: {len(comp)}, unique gvkeys: {comp['gvkey'].nunique()}")
+            comp = comp.merge(sp1500_fy.assign(sp1500=1), on=['gvkey','fyear'], how='inner')
+            print(f"[SP1500] comp restricted rows: {len(comp)}, unique gvkeys: {comp['gvkey'].nunique()}")
+        else:
+            print("DEBUG: No S&P 1500 data available, using full Compustat sample")
 
         # Compustat company (for SIC if funda lacks it)
         print("DEBUG: Pulling Compustat company data...")
@@ -110,11 +276,14 @@ def try_wrds_pull():
         # Compustat security (not needed for current analysis)
         security = pd.DataFrame()
 
-        # ExecuComp (try comp_execucomp first, fallback to execucomp)
+        # ExecuComp - Multiple tables for comprehensive data
         print("DEBUG: Pulling ExecuComp data...")
+        
+        # Main executive compensation data (ANNCOMP)
+        execu = pd.DataFrame()
         try:
             execu = conn.get_table('comp_execucomp', 'anncomp',
-                                   columns=['gvkey','year','ceoann','gender','becameceo'],
+                                   columns=['gvkey','year','ceoann','gender','becameceo','execid','coname'],
                                    coerce_float=True)  # No limit for production
             print(f"DEBUG: Pulled {len(execu)} rows from comp_execucomp.anncomp")
         except Exception as e:
@@ -122,45 +291,138 @@ def try_wrds_pull():
             print("DEBUG: Trying fallback to execucomp.anncomp...")
             try:
                 execu = conn.get_table('execucomp', 'anncomp',
-                               columns=['gvkey','year','ceoann','gender','becameceo'],
+                               columns=['gvkey','year','ceoann','gender','becameceo','execid','coname'],
                                        coerce_float=True)  # No limit for production
                 print(f"DEBUG: Pulled {len(execu)} rows from execucomp.anncomp")
             except Exception as e2:
                 print(f"DEBUG: execucomp.anncomp also failed: {e2}")
                 execu = pd.DataFrame()
+        
+        # Executive person data (PERSON) - for additional executive info
+        execu_person = pd.DataFrame()
+        try:
+            execu_person = conn.get_table('comp_execucomp', 'person',
+                                          columns=['execid','age','gender'],
+                                          coerce_float=True)  # No limit for production
+            print(f"DEBUG: Pulled {len(execu_person)} rows from comp_execucomp.person")
+        except Exception as e:
+            print(f"DEBUG: comp_execucomp.person failed: {e}")
+            try:
+                execu_person = conn.get_table('execucomp', 'person',
+                                              columns=['execid','age','gender'],
+                                              coerce_float=True)
+                print(f"DEBUG: Pulled {len(execu_person)} rows from execucomp.person")
+            except Exception as e2:
+                print(f"DEBUG: execucomp.person also failed: {e2}")
+                execu_person = pd.DataFrame()
+        
+        # Company executive roles (COPEROL) - for better CEO tenure tracking
+        execu_roles = pd.DataFrame()
+        try:
+            execu_roles = conn.get_table('comp_execucomp', 'coperol',
+                                         columns=['gvkey','execid','becameceo','leftceo','becameco','leftco'],
+                                         coerce_float=True)  # No limit for production
+            print(f"DEBUG: Pulled {len(execu_roles)} rows from comp_execucomp.coperol")
+        except Exception as e:
+            print(f"DEBUG: comp_execucomp.coperol failed: {e}")
+            try:
+                execu_roles = conn.get_table('execucomp', 'coperol',
+                                             columns=['gvkey','execid','becameceo','leftceo','becameco','leftco'],
+                                             coerce_float=True)
+                print(f"DEBUG: Pulled {len(execu_roles)} rows from execucomp.coperol")
+            except Exception as e2:
+                print(f"DEBUG: execucomp.coperol also failed: {e2}")
+                execu_roles = pd.DataFrame()
+        
+        # Company level data (COLEV) - for additional company info
+        execu_company = pd.DataFrame()
+        try:
+            execu_company = conn.get_table('comp_execucomp', 'colev',
+                                           columns=['gvkey','year','sic','cusip','ticker','exchg','spindx'],
+                                           coerce_float=True)  # No limit for production
+            print(f"DEBUG: Pulled {len(execu_company)} rows from comp_execucomp.colev")
+        except Exception as e:
+            print(f"DEBUG: comp_execucomp.colev failed: {e}")
+            try:
+                execu_company = conn.get_table('execucomp', 'colev',
+                                               columns=['gvkey','year','sic','cusip','ticker','exchg','spindx'],
+                                               coerce_float=True)
+                print(f"DEBUG: Pulled {len(execu_company)} rows from execucomp.colev")
+            except Exception as e2:
+                print(f"DEBUG: execucomp.colev also failed: {e2}")
+                execu_company = pd.DataFrame()
 
-        # BoardEx–Compustat link (correct table for firm mapping)
+        # BoardEx–Compustat link using proper WRDS dataset
         print("DEBUG: Pulling BoardEx-Compustat link data...")
+        link = pd.DataFrame()
         try:
-            link = conn.get_table('wrdsapps', 'boardex_compustat_link',
-                                  columns=['companyid', 'gvkey', 'linkdt', 'linkenddt'],
+            link = conn.get_table('wrdsapps', 'bdxcrspcomplink',
+                                  columns=['companyid', 'gvkey', 'score', 'preferred', 'duplicate'],
                                   coerce_float=True)  # No limit for production
-            print(f"DEBUG: Pulled {len(link)} rows from boardex_compustat_link")
+            print(f"DEBUG: Pulled {len(link)} rows from wrdsapps.bdxcrspcomplink")
+            
+            # Filter to preferred links only (best quality matches)
+            if not link.empty and 'preferred' in link.columns:
+                original_count = len(link)
+                link = link[link['preferred'] == 1].copy()
+                print(f"DEBUG: Filtered to preferred links: {len(link)} rows (from {original_count})")
+                
+                # Show score distribution for preferred links
+                if 'score' in link.columns:
+                    print(f"DEBUG: Score distribution for preferred links: {link['score'].value_counts().sort_index().to_dict()}")
         except Exception as e:
-            print(f"DEBUG: BoardEx-Compustat link pull failed: {e}")
-            link = pd.DataFrame()
+            print(f"DEBUG: wrdsapps.bdxcrspcomplink failed: {e}")
+            # Fallback to old method
+            try:
+                link = conn.get_table('wrdsapps', 'boardex_compustat_link',
+                                      columns=['companyid', 'gvkey', 'linkdt', 'linkenddt'],
+                                      coerce_float=True)
+                print(f"DEBUG: Pulled {len(link)} rows from wrdsapps.boardex_compustat_link (fallback)")
+            except Exception as e2:
+                print(f"DEBUG: wrdsapps.boardex_compustat_link fallback failed: {e2}")
+                link = pd.DataFrame()
 
-        # BoardEx company-level board characteristics
+        # BoardEx company-level board characteristics using WRDS aggregated dataset
         print("DEBUG: Pulling BoardEx board characteristics...")
+        bx = pd.DataFrame()
         try:
-            bx = conn.get_table('boardex_na', 'na_board_characteristics',
-                                columns=['boardid', 'numberdirectors', 'nationalitymix', 'genderratio', 'annualreportdate'],
+            # Try WRDS aggregated org summary first
+            bx = conn.get_table('boardex_na', 'na_wrds_org_summary',
+                                columns=['companyid', 'boardid', 'numberdirectors', 'nationalitymix', 'genderratio', 'annualreportdate'],
                                 coerce_float=True)  # No limit for production
-            print(f"DEBUG: Pulled {len(bx)} rows from na_board_characteristics")
+            print(f"DEBUG: Pulled {len(bx)} rows from boardex_na.na_wrds_org_summary")
         except Exception as e:
-            print(f"DEBUG: BoardEx board characteristics pull failed: {e}")
-            bx = pd.DataFrame()
+            print(f"DEBUG: boardex_na.na_wrds_org_summary failed: {e}")
+            # Fallback to raw board characteristics
+            try:
+                bx = conn.get_table('boardex_na', 'na_board_characteristics',
+                                    columns=['boardid', 'numberdirectors', 'nationalitymix', 'genderratio', 'annualreportdate'],
+                                    coerce_float=True)
+                print(f"DEBUG: Pulled {len(bx)} rows from boardex_na.na_board_characteristics (fallback)")
+            except Exception as e2:
+                print(f"DEBUG: boardex_na.na_board_characteristics fallback failed: {e2}")
+                bx = pd.DataFrame()
 
-        # BoardEx company profile (for boardid -> companyid mapping)
+        # BoardEx company profile using WRDS aggregated dataset
         print("DEBUG: Pulling BoardEx company profile...")
+        prof = pd.DataFrame()
         try:
-            prof = conn.get_table('boardex_na', 'na_company_profile',
+            # Try WRDS aggregated company profile first
+            prof = conn.get_table('boardex_na', 'na_wrds_company_profile',
                                   columns=['companyid', 'boardid'],
                                   coerce_float=True)  # No limit for production
-            print(f"DEBUG: Pulled {len(prof)} rows from na_company_profile")
+            print(f"DEBUG: Pulled {len(prof)} rows from boardex_na.na_wrds_company_profile")
         except Exception as e:
-            print(f"DEBUG: BoardEx company profile pull failed: {e}")
-            prof = pd.DataFrame()
+            print(f"DEBUG: boardex_na.na_wrds_company_profile failed: {e}")
+            # Fallback to raw company profile
+            try:
+                prof = conn.get_table('boardex_na', 'na_company_profile',
+                                      columns=['companyid', 'boardid'],
+                                      coerce_float=True)
+                print(f"DEBUG: Pulled {len(prof)} rows from boardex_na.na_company_profile (fallback)")
+            except Exception as e2:
+                print(f"DEBUG: boardex_na.na_company_profile fallback failed: {e2}")
+                prof = pd.DataFrame()
 
         # BoardEx company profile stocks (for ticker linking)
         print("DEBUG: Pulling BoardEx company profile stocks...")
@@ -173,63 +435,17 @@ def try_wrds_pull():
             print(f"DEBUG: BoardEx company profile stocks pull failed: {e}")
             bx_stocks = pd.DataFrame()
 
-        # S&P 1500 membership (S&P 500 + S&P MidCap 400 + S&P SmallCap 600)
-        print("DEBUG: Pulling S&P 1500 membership data...")
-        try:
-            # Get S&P 1500 membership from idxcst_his with index names (alias quoted columns)
-            sp1500 = conn.get_table('comp', 'idxcst_his',
-                                    columns=['gvkey', 'indexid', 'indexname', '"from" as from_date', '"thru" as thru_date'],
-                                    coerce_float=True)  # No limit for production
-            print(f"DEBUG: Pulled {len(sp1500)} rows from idxcst_his")
-            
-            # Filter to actual S&P 1500 indices
-            if not sp1500.empty:
-                # Filter to S&P 500, S&P MidCap 400, and S&P SmallCap 600
-                sp_indices = ['S&P 500', 'S&P MidCap 400', 'S&P SmallCap 600']
-                sp1500 = sp1500[sp1500['indexname'].isin(sp_indices)]
-                print(f"DEBUG: After filtering to S&P 1500 indices: {len(sp1500)} rows")
-                print(f"DEBUG: Index distribution: {sp1500['indexname'].value_counts().to_dict()}")
-                
-        except Exception as e:
-            print(f"DEBUG: S&P 1500 membership pull failed: {e}")
-            # Fallback to S&P 500 if idxcst_his fails
-            try:
-                print("DEBUG: Trying S&P 500 fallback...")
-                sp500 = conn.get_table('crsp_a_indexes', 'dsp500list',
-                                       columns=['permno', 'start', 'ending'],
-                                       coerce_float=True)  # No limit for production
-                print(f"DEBUG: Pulled {len(sp500)} rows from dsp500list")
-                
-                # Get CRSP-Compustat link table
-                link_table = conn.get_table('crsp_a_ccm', 'ccmxpf_linktable',
-                                            columns=['gvkey', 'lpermno', 'linkdt', 'linkenddt'],
-                                            coerce_float=True)  # No limit for production
-                print(f"DEBUG: Pulled {len(link_table)} rows from ccmxpf_linktable")
-                
-                # Merge to get gvkey for S&P 500 firms
-                if not sp500.empty and not link_table.empty:
-                    # Convert dates
-                    sp500['start'] = pd.to_datetime(sp500['start'], errors='coerce')
-                    sp500['ending'] = pd.to_datetime(sp500['ending'], errors='coerce')
-                    link_table['linkdt'] = pd.to_datetime(link_table['linkdt'], errors='coerce')
-                    link_table['linkenddt'] = pd.to_datetime(link_table['linkenddt'], errors='coerce')
-                    
-                    # Create S&P 500 membership with gvkey
-                    sp1500 = sp500.merge(link_table, left_on='permno', right_on='lpermno', how='inner')
-                    sp1500 = sp1500[['gvkey', 'start', 'ending']].rename(columns={'start': 'from_date', 'ending': 'thru_date'})
-                    print(f"DEBUG: Created S&P 500 membership with {len(sp1500)} gvkey-date pairs")
-                else:
-                    sp1500 = pd.DataFrame()
-            except Exception as e2:
-                print(f"DEBUG: S&P 500 fallback also failed: {e2}")
-                sp1500 = pd.DataFrame()
+        # S&P 1500 data is already built above and used to restrict Compustat
+        sp1500 = sp1500_fy  # Use the firm-year data for return
+        
+        # S&P 1500 fallback not needed - using proper index ID approach above
 
         # normalize column names
-        for df in (comp, company, execu, link, bx, prof, bx_stocks):
+        for df in (comp, company, execu, execu_person, execu_roles, execu_company, link, bx, prof, bx_stocks):
             if not df.empty:
                 df.columns = [c.lower() for c in df.columns]
 
-        return {"comp": comp, "company": company, "execu": execu, "link": link, "bx": bx, "prof": prof, "bx_stocks": bx_stocks, "sp1500": sp1500}
+        return {"comp": comp, "company": company, "execu": execu, "execu_person": execu_person, "execu_roles": execu_roles, "execu_company": execu_company, "link": link, "bx": bx, "prof": prof, "bx_stocks": bx_stocks, "sp1500": sp1500}
 
     except Exception as e:
         print(f"DEBUG: WRDS pull failed with error: {e}")
@@ -285,6 +501,9 @@ def coalesce_sources(wrds_dict):
     comp = wrds_dict.get("comp", pd.DataFrame())
     company = wrds_dict.get("company", pd.DataFrame())
     execu = wrds_dict.get("execu", pd.DataFrame())
+    execu_person = wrds_dict.get("execu_person", pd.DataFrame())
+    execu_roles = wrds_dict.get("execu_roles", pd.DataFrame())
+    execu_company = wrds_dict.get("execu_company", pd.DataFrame())
     link  = wrds_dict.get("link",  pd.DataFrame())
     bx    = wrds_dict.get("bx",    pd.DataFrame())
     prof  = wrds_dict.get("prof",  pd.DataFrame())
@@ -331,10 +550,10 @@ def coalesce_sources(wrds_dict):
     if sp1500.empty:
         warnings.warn("S&P 1500 membership not provided; proceeding WITHOUT SP1500 filter.")
 
-    return comp, execu, link, bx, prof, bx_stocks, sp1500
+    return comp, execu, execu_person, execu_roles, execu_company, link, bx, prof, bx_stocks, sp1500
 
 
-def build_and_merge(comp, execu, link, bx, prof, bx_stocks):
+def build_and_merge(comp, execu, execu_person, execu_roles, execu_company, link, bx, prof, bx_stocks):
     """Merge Compustat + ExecuComp + BoardEx via proper link table."""
     comp = comp.copy()
     # ExecuComp normalization
@@ -348,11 +567,35 @@ def build_and_merge(comp, execu, link, bx, prof, bx_stocks):
         if 'ceoann' in execu.columns:
             print(f"DEBUG: Before CEO filter: {len(execu)} ExecuComp observations")
             # Check what values ceoann has
-            print(f"DEBUG: ceoann unique values: {execu['ceoann'].value_counts()}")
-            # Filter to CEO observations (ceoann == 1 or 'CEO' or similar)
-            ceo_mask = (execu['ceoann'] == 1) | (execu['ceoann'] == 'CEO') | (execu['ceoann'].astype(str).str.upper() == 'CEO')
+            print(f"DEBUG: ceoann unique values:")
+            print(execu['ceoann'].value_counts(dropna=False))
+            
+            # More robust CEO filtering - handle all common encodings
+            ceo_mask = execu['ceoann'].astype(str).str.strip().str.upper().isin(['1','CEO','CEOANN','Y','TRUE'])
             execu = execu[ceo_mask].copy()
             print(f"DEBUG: After CEO filter: {len(execu)} CEO observations")
+            
+            # Verify we have reasonable CEO coverage
+            if len(execu) == 0:
+                print("WARNING: No CEO observations found after filtering!")
+            else:
+                print(f"DEBUG: CEO coverage: {len(execu)} CEO observations")
+                
+            # Check for duplicate CEOs per firm-year and resolve them
+            if not execu.empty:
+                ceo_duplicates = execu.groupby(['gvkey', 'fyear']).size()
+                duplicate_firms = ceo_duplicates[ceo_duplicates > 1]
+                if len(duplicate_firms) > 0:
+                    print(f"WARNING: {len(duplicate_firms)} firm-years have multiple CEOs")
+                    print("Sample of duplicates:")
+                    print(duplicate_firms.head())
+                    
+                    # Resolve duplicates by keeping the first CEO (or you could use other criteria)
+                    print("DEBUG: Resolving duplicate CEOs by keeping the first occurrence...")
+                    execu = execu.drop_duplicates(subset=['gvkey', 'fyear'], keep='first')
+                    print(f"DEBUG: After deduplication: {len(execu)} CEO observations")
+                else:
+                    print("DEBUG: No duplicate CEOs per firm-year found")
         
         # female_ceo from gender or ceo_gender (now only for CEOs)
         if 'gender' in execu.columns:
@@ -377,10 +620,42 @@ def build_and_merge(comp, execu, link, bx, prof, bx_stocks):
     else:
         df = comp.copy()
         warnings.warn("ExecuComp did not have compatible gvkey/fyear; skipping firm-year merge with ExecuComp.")
+    
+    # Merge additional ExecuComp data for better CEO tenure and company info
+    if not execu_person.empty and 'execid' in df.columns:
+        print("DEBUG: Merging ExecuComp person data...")
+        df = df.merge(execu_person, on='execid', how='left', suffixes=('', '_person'))
+        print(f"DEBUG: After person merge: {len(df)} rows")
+    
+    if not execu_roles.empty and 'execid' in df.columns:
+        print("DEBUG: Merging ExecuComp roles data for better CEO tenure...")
+        # Use COPEROL data to improve CEO tenure calculation
+        roles_ceo = execu_roles[execu_roles['becameceo'].notna()].copy()
+        if not roles_ceo.empty:
+            # Convert becameceo to year
+            roles_ceo['becameceo_year_roles'] = pd.to_datetime(roles_ceo['becameceo'], errors='coerce').dt.year
+            df = df.merge(roles_ceo[['execid', 'becameceo_year_roles']], on='execid', how='left', suffixes=('', '_roles'))
+            print(f"DEBUG: After roles merge: {len(df)} rows")
+    
+    if not execu_company.empty:
+        print("DEBUG: Merging ExecuComp company data...")
+        # Merge company-level data (SIC, ticker, exchange, S&P index info)
+        company_cols = ['gvkey', 'year', 'sic', 'cusip', 'ticker', 'exchg', 'spindx']
+        available_cols = [c for c in company_cols if c in execu_company.columns]
+        if available_cols:
+            execu_company_clean = execu_company[available_cols].copy()
+            if 'year' in execu_company_clean.columns:
+                execu_company_clean.rename(columns={'year': 'fyear'}, inplace=True)
+            
+            # Merge on gvkey and fyear
+            merge_cols = [c for c in ['gvkey', 'fyear'] if c in execu_company_clean.columns and c in df.columns]
+            if merge_cols:
+                df = df.merge(execu_company_clean, on=merge_cols, how='left', suffixes=('', '_exec_comp'))
+                print(f"DEBUG: After company merge: {len(df)} rows")
 
     # Attach BoardEx data via proper link table (year-varying)
-    if not bx.empty and not link.empty and not prof.empty:
-        print("DEBUG: Attempting BoardEx merge via link table...")
+    if not bx.empty:
+        print("DEBUG: Attempting BoardEx merge...")
         
         # Harmonize BoardEx columns
         ren = {}
@@ -389,10 +664,6 @@ def build_and_merge(comp, execu, link, bx, prof, bx_stocks):
         if 'numberdirectors' in bx.columns: ren['numberdirectors'] = 'board_size'
         bx.rename(columns=ren, inplace=True)
 
-        # Convert dates in link table
-        link['linkdt'] = pd.to_datetime(link['linkdt'], errors='coerce')
-        link['linkenddt'] = pd.to_datetime(link['linkenddt'], errors='coerce')
-        
         # Convert BoardEx report date
         if 'annualreportdate' in bx.columns:
             bx['annualreportdate'] = pd.to_datetime(bx['annualreportdate'], errors='coerce')
@@ -402,56 +673,104 @@ def build_and_merge(comp, execu, link, bx, prof, bx_stocks):
         print(f"DEBUG: BoardEx company profile: {len(prof)} rows")
         print(f"DEBUG: BoardEx link table: {len(link)} rows")
         
-        # First, map boardid to companyid
-        bx_with_companyid = bx.merge(prof, on='boardid', how='inner')
-        print(f"DEBUG: BoardEx with companyid: {len(bx_with_companyid)} rows")
-        
-        # Then merge with link table
-        bx_with_link = bx_with_companyid.merge(link, on='companyid', how='inner')
-        print(f"DEBUG: BoardEx with link: {len(bx_with_link)} rows")
-        
-        # Create year-varying BoardEx data
-        bx_year_varying = []
-        
-        for _, row in bx_with_link.iterrows():
-            gvkey = row['gvkey']
-            link_start = row['linkdt']
-            link_end = row['linkenddt']
-            report_year = row.get('report_year', None)
+        # Try link table approach first (if we have both link and prof)
+        bx_merged = False
+        if not link.empty and not prof.empty:
+            print("DEBUG: Attempting BoardEx merge via link table...")
             
-            # Determine valid years for this BoardEx observation
-            if pd.notna(link_start) and pd.notna(link_end):
-                # Use link date window
-                start_year = link_start.year
-                end_year = link_end.year
-            elif pd.notna(report_year):
-                # Use report year ± 1 year
-                start_year = report_year - 1
-                end_year = report_year + 1
+            # Check if we have the new bdxcrspcomplink structure or old structure
+            has_date_columns = 'linkdt' in link.columns and 'linkenddt' in link.columns
+            
+            if has_date_columns:
+                # Old structure with date columns
+                print("DEBUG: Using old link table structure with date columns")
+                link['linkdt'] = pd.to_datetime(link['linkdt'], errors='coerce')
+                link['linkenddt'] = pd.to_datetime(link['linkenddt'], errors='coerce')
             else:
-                # Skip if no valid dates
-                continue
+                # New bdxcrspcomplink structure - use preferred links only
+                print("DEBUG: Using new bdxcrspcomplink structure")
+                if 'preferred' in link.columns:
+                    link = link[link['preferred'] == 1].copy()
+                    print(f"DEBUG: Filtered to preferred links: {len(link)} rows")
             
-            # Create firm-year observations for this BoardEx data
-            for year in range(start_year, end_year + 1):
-                bx_year_varying.append({
-                    'gvkey': gvkey,
-                    'fyear': year,
-                    'board_size': row.get('board_size'),
-                    'nationality_mix': row.get('nationality_mix'),
-                    'gender_ratio': row.get('gender_ratio')
-                })
+            # First, map boardid to companyid
+            bx_with_companyid = bx.merge(prof, on='boardid', how='inner')
+            print(f"DEBUG: BoardEx with companyid: {len(bx_with_companyid)} rows")
+            
+            # Then merge with link table
+            bx_with_link = bx_with_companyid.merge(link, on='companyid', how='inner')
+            print(f"DEBUG: BoardEx with link: {len(bx_with_link)} rows")
+            
+            if not bx_with_link.empty:
+                if has_date_columns:
+                    # Create year-varying BoardEx data using date windows
+                    bx_year_varying = []
+                    
+                    for _, row in bx_with_link.iterrows():
+                        gvkey = row['gvkey']
+                        link_start = row['linkdt']
+                        link_end = row['linkenddt']
+                        report_year = row.get('report_year', None)
+                        
+                        # Determine valid years for this BoardEx observation
+                        if pd.notna(link_start) and pd.notna(link_end):
+                            # Use link date window
+                            start_year = link_start.year
+                            end_year = link_end.year
+                        elif pd.notna(report_year):
+                            # Use report year ± 1 year
+                            start_year = report_year - 1
+                            end_year = report_year + 1
+                        else:
+                            # Skip if no valid dates
+                            continue
+                        
+                        # Create firm-year observations for this BoardEx data
+                        for year in range(start_year, end_year + 1):
+                            bx_year_varying.append({
+                                'gvkey': gvkey,
+                                'fyear': year,
+                                'board_size': row.get('board_size'),
+                                'nationality_mix': row.get('nationality_mix'),
+                                'gender_ratio': row.get('gender_ratio')
+                            })
+                    
+                    if bx_year_varying:
+                        bx_df = pd.DataFrame(bx_year_varying)
+                        print(f"DEBUG: BoardEx year-varying data: {len(bx_df)} firm-year observations")
+                        
+                        # Merge with main dataset
+                        df = df.merge(bx_df, on=['gvkey', 'fyear'], how='left', suffixes=('', '_bx'))
+                        print(f"DEBUG: After BoardEx merge: {len(df)} rows")
+                        bx_merged = True
+                else:
+                    # New structure - merge directly without year-varying logic
+                    print("DEBUG: Using direct merge for new link table structure")
+                    bx_merge_cols = ['gvkey', 'board_size', 'nationality_mix', 'gender_ratio']
+                    available_cols = [col for col in bx_merge_cols if col in bx_with_link.columns]
+                    
+                    if available_cols:
+                        df = df.merge(bx_with_link[available_cols], on='gvkey', how='left', suffixes=('', '_bx'))
+                        print(f"DEBUG: After BoardEx merge: {len(df)} rows")
+                        bx_merged = True
         
-        if bx_year_varying:
-            bx_df = pd.DataFrame(bx_year_varying)
-            print(f"DEBUG: BoardEx year-varying data: {len(bx_df)} firm-year observations")
+        # Fallback: try ticker-based merge if link table approach failed
+        if not bx_merged and not bx_stocks.empty and 'tic' in df.columns:
+            print("DEBUG: Link table approach failed, trying ticker-based merge...")
             
-            # Merge with main dataset
-            df = df.merge(bx_df, on=['gvkey', 'fyear'], how='left', suffixes=('', '_bx'))
-            print(f"DEBUG: After BoardEx merge: {len(df)} rows")
-            print(f"DEBUG: BoardEx coverage: {df['board_size'].notna().sum()} firm-years")
-        else:
-            print("DEBUG: No valid BoardEx year-varying data created")
+            # Map boardid to ticker via bx_stocks
+            bx_with_ticker = bx.merge(bx_stocks, on='boardid', how='inner')
+            print(f"DEBUG: BoardEx with ticker: {len(bx_with_ticker)} rows")
+            
+            if not bx_with_ticker.empty:
+                # Merge with main dataset on ticker
+                df = df.merge(bx_with_ticker[['ticker', 'board_size', 'nationality_mix', 'gender_ratio']], 
+                             left_on='tic', right_on='ticker', how='left', suffixes=('', '_bx'))
+                print(f"DEBUG: After ticker-based BoardEx merge: {len(df)} rows")
+                bx_merged = True
+        
+        if not bx_merged:
+            print("DEBUG: All BoardEx merge approaches failed")
             # Create placeholder columns
             df['board_size'] = pd.NA
             df['nationality_mix'] = pd.NA
@@ -462,6 +781,24 @@ def build_and_merge(comp, execu, link, bx, prof, bx_stocks):
         df['board_size'] = pd.NA
         df['nationality_mix'] = pd.NA
         df['gender_ratio'] = pd.NA
+    
+    # Diagnostic print for BoardEx coverage
+    if 'board_size' in df.columns:
+        print(f"DEBUG: BoardEx coverage after merge:")
+        print(f"DEBUG: board_size: {df['board_size'].notna().sum()}/{len(df)} ({df['board_size'].notna().mean():.1%})")
+        print(f"DEBUG: nationality_mix: {df['nationality_mix'].notna().sum()}/{len(df)} ({df['nationality_mix'].notna().mean():.1%})")
+        print(f"DEBUG: gender_ratio: {df['gender_ratio'].notna().sum()}/{len(df)} ({df['gender_ratio'].notna().mean():.1%})")
+        
+        # Check if BoardEx variables vary by year (important for within-transformation)
+        if 'fyear' in df.columns:
+            print(f"DEBUG: BoardEx year variation check:")
+            for col in ['board_size', 'nationality_mix', 'gender_ratio']:
+                if col in df.columns:
+                    # Check how many unique values per firm
+                    firm_variation = df.groupby('gvkey')[col].nunique()
+                    varying_firms = (firm_variation > 1).sum()
+                    total_firms = firm_variation.count()
+                    print(f"DEBUG: {col}: {varying_firms}/{total_firms} firms have year variation")
 
     # Guard against duplicate firm-years after BoardEx merge
     print(f"DEBUG: Before duplicate check: {len(df)} observations")
@@ -501,8 +838,8 @@ def construct_vars(df):
         print(f"DEBUG: becameceo_year data types: {df['becameceo_year'].dtype}")
     
     if 'becameceo_year' not in df.columns or df['becameceo_year'].isna().all():
-        # try ExecuComp alias if present
-        for alt in ['becameceo_year_exec','becameceo_exec', 'becameceo']:
+        # try ExecuComp alias if present, including improved COPEROL data
+        for alt in ['becameceo_year_roles', 'becameceo_year_exec','becameceo_exec', 'becameceo']:
             if alt in df.columns:
                 df['becameceo_year'] = df[alt]
                 print(f"DEBUG: Using {alt} for becameceo_year")
@@ -565,92 +902,47 @@ def apply_filters(df, sp1500):
     if not sp1500.empty:
         print(f"DEBUG: S&P 1500 data shape: {sp1500.shape}")
         print(f"DEBUG: S&P 1500 columns: {list(sp1500.columns)}")
-        sp = sp1500.copy()
-        
-        # Handle S&P 1500 from idxcst_his (proper format)
-        if 'from' in sp.columns and 'thru' in sp.columns:
-            # Convert dates and create year ranges
-            sp['from'] = pd.to_datetime(sp['from'], errors='coerce')
-            sp['thru'] = pd.to_datetime(sp['thru'], errors='coerce')
-            
-            # Create year ranges for each gvkey (handle open-ended memberships)
-            sp_list = []
-            for _, row in sp.iterrows():
-                if pd.notna(row['from']):
-                    start_year = row['from'].year
-                    # Handle open-ended memberships (null thru) by treating as far-future date
-                    if pd.notna(row['thru']):
-                        end_year = row['thru'].year
-                    else:
-                        end_year = YEARS[1] + 10  # Extend well beyond our sample period
-                    
-                    for year in range(start_year, end_year + 1):
-                        if YEARS[0] <= year <= YEARS[1]:  # Only include years in our sample
-                            sp_list.append({'gvkey': row['gvkey'], 'fyear': year, 'sp1500': 1})
-            
-            if sp_list:
-                sp = pd.DataFrame(sp_list)
-                print(f"DEBUG: Created S&P 1500 year ranges: {len(sp)} gvkey-year pairs")
-            else:
-                sp = pd.DataFrame()
-        
-        # Handle S&P 500 date range format from WRDS (fallback)
-        elif 'from_date' in sp.columns and 'thru_date' in sp.columns:
-            # Convert dates and create year ranges
-            sp['from_date'] = pd.to_datetime(sp['from_date'], errors='coerce')
-            sp['thru_date'] = pd.to_datetime(sp['thru_date'], errors='coerce')
-            
-            # Create year ranges for each gvkey (handle open-ended memberships)
-            sp_list = []
-            for _, row in sp.iterrows():
-                if pd.notna(row['from_date']):
-                    start_year = row['from_date'].year
-                    # Handle open-ended memberships (null thru) by treating as far-future date
-                    if pd.notna(row['thru_date']):
-                        end_year = row['thru_date'].year
-                    else:
-                        end_year = YEARS[1] + 10  # Extend well beyond our sample period
-                    
-                    for year in range(start_year, end_year + 1):
-                        if YEARS[0] <= year <= YEARS[1]:  # Only include years in our sample
-                            sp_list.append({'gvkey': row['gvkey'], 'fyear': year, 'sp1500': 1})
-            
-            if sp_list:
-                sp = pd.DataFrame(sp_list)
-            else:
-                sp = pd.DataFrame()
-        
-        # Handle traditional format
-        if 'year' in sp.columns and 'fyear' not in sp.columns:
-            sp.rename(columns={'year':'fyear'}, inplace=True)
-        
-        if not sp.empty:
-            keep_cols = [c for c in ['gvkey','fyear','sp1500'] if c in sp.columns]
-            if 'sp1500' not in keep_cols:
-                sp['sp1500'] = 1
-                keep_cols = [c for c in ['gvkey','fyear','sp1500'] if c in sp.columns or c == 'sp1500']
-            
-            print(f"DEBUG: Merging with S&P data using columns: {keep_cols}")
-            print(f"DEBUG: S&P data sample: {sp[keep_cols].head()}")
-            print(f"DEBUG: Main data gvkey-fyear sample: {df[['gvkey', 'fyear']].head()}")
-            
-            df = df.merge(sp[keep_cols], on=['gvkey','fyear'], how='inner')
-            print(f"DEBUG: After S&P 1500 filter (inner join): {len(df)} observations")
-            
-            # Check BoardEx data after filtering
-            print(f"DEBUG: BoardEx data after S&P 1500 filter:")
-            for col in ['board_size', 'nationality_mix', 'gender_ratio']:
-                if col in df.columns:
-                    non_null = df[col].notna().sum()
-                    print(f"DEBUG: {col}: {non_null} non-null values out of {len(df)}")
-            
-            # Note: BoardEx controls currently have 0% coverage due to missing link tables
-            # For graded run, consider dropping rows with missing board controls instead of imputation
-            # to avoid changing the estimand (currently using median/mean fill)
+
+        # Case A: already firm–year pairs
+        if {'gvkey','fyear'}.issubset(sp1500.columns) and not {'from_date','thru_date'}.issubset(sp1500.columns):
+            sp1500_fy = sp1500[['gvkey','fyear']].drop_duplicates().copy()
+            sp1500_fy['sp1500'] = 1
         else:
-            warnings.warn("S&P 1500 data available but no valid date ranges found.")
+            # Case B: expand date windows to firm–years
+            sp = sp1500.copy()
+            sp['from_date'] = pd.to_datetime(sp['from_date'], errors='coerce')
+            sp['thru_date'] = pd.to_datetime(sp['thru_date'], errors='coerce').fillna(pd.Timestamp('2099-12-31'))
+            years = np.arange(YEARS[0], YEARS[1] + 1)
+            rows = []
+            for g, sub in sp.groupby('gvkey'):
+                for _, r in sub.iterrows():
+                    for y in years:
+                        fy_end = pd.Timestamp(f"{y}-12-31")
+                        if (fy_end >= r['from_date']) and (fy_end <= r['thru_date']):
+                            rows.append((g, y))
+            sp1500_fy = pd.DataFrame(rows, columns=['gvkey','fyear']).drop_duplicates()
+            sp1500_fy['sp1500'] = 1
+        
+        print(f"DEBUG: Created S&P 1500 fiscal year membership: {len(sp1500_fy)} gvkey-year pairs")
+        print(f"DEBUG: Unique gvkeys in S&P 1500: {sp1500_fy['gvkey'].nunique()}")
+        
+        # Inner-join to restrict Compustat to S&P 1500 members
+        print(f"DEBUG: Before S&P 1500 filter - Compustat rows: {len(df)}, unique gvkeys: {df['gvkey'].nunique()}")
+        df = df.merge(sp1500_fy, on=['gvkey','fyear'], how='inner')
+        print(f"[SP1500] rows: {len(df)}, firms: {df['gvkey'].nunique()}")
+        
+        # Sanity checks
+        assert df['fyear'].between(YEARS[0], YEARS[1]).all(), "All years should be in 2000-2010 range"
+        
+        # Check BoardEx data after filtering
+        print(f"DEBUG: BoardEx data after S&P 1500 filter:")
+        for col in ['board_size', 'nationality_mix', 'gender_ratio']:
+            if col in df.columns:
+                non_null = df[col].notna().sum()
+                print(f"DEBUG: {col}: {non_null} non-null values out of {len(df)}")
     else:
-        warnings.warn("Proceeding without explicit S&P 1500 filter (sp1500 file missing).")
+        print("DEBUG: No S&P filter available - using full Compustat sample")
+        print("WARNING: Sample may be larger than expected without S&P 1500 restriction")
 
     return df
 
@@ -683,38 +975,21 @@ def create_pretty_html_table(model, data):
     def format_se(se):
         return f"({se:.4f})"
     
-    # Create variable labels for better readability
+    # Create variable labels for better readability (firm FE specification)
     var_labels = {
         'const': 'Constant',
-        'female_ceo': 'Female CEO',
-        'ln_assets': 'Log Assets',
-        'leverage': 'Leverage',
-        'board_size': 'Board Size',
-        'nationality_mix': 'Board Nationality Mix',
-        'gender_ratio': 'Board Gender Ratio',
-        'ceo_tenure': 'CEO Tenure',
-        'sic1_3': 'SIC 3 (Manufacturing)',
-        'sic1_4': 'SIC 4 (Transportation)',
-        'sic1_5': 'SIC 5 (Trade)',
-        'sic1_6': 'SIC 6 (Finance)',
-        'sic1_7': 'SIC 7 (Services)',
-        'sic1_9': 'SIC 9 (Government)',
-        'year_2001': 'Year 2001',
-        'year_2002': 'Year 2002',
-        'year_2003': 'Year 2003',
-        'year_2004': 'Year 2004',
-        'year_2005': 'Year 2005',
-        'year_2006': 'Year 2006',
-        'year_2007': 'Year 2007',
-        'year_2008': 'Year 2008',
-        'year_2009': 'Year 2009',
-        'year_2010': 'Year 2010'
+        'female_ceo_demeaned': 'Female CEO',
+        'size_demeaned': 'Size (Log Assets)',
+        'leverage_demeaned': 'Leverage',
+        'board_size_demeaned': 'Board Size',
+        'nationality_mix_demeaned': 'Board Nationality Mix',
+        'board_gender_ratio_demeaned': 'Board Gender Ratio',
+        'ceo_tenure_demeaned': 'CEO Tenure'
     }
     
-    # Group variables by type
-    main_vars = ['const', 'female_ceo', 'ln_assets', 'leverage', 'board_size', 'nationality_mix', 'gender_ratio', 'ceo_tenure']
-    sic_vars = [v for v in params.index if v.startswith('sic1_')]
-    year_vars = [v for v in params.index if v.startswith('year_')]
+    # Group variables by type (firm FE - no industry/year dummies)
+    main_vars = ['const', 'female_ceo_demeaned', 'size_demeaned', 'leverage_demeaned', 
+                 'board_size_demeaned', 'nationality_mix_demeaned', 'board_gender_ratio_demeaned', 'ceo_tenure_demeaned']
     
     html = f"""
     <!DOCTYPE html>
@@ -841,7 +1116,7 @@ def create_pretty_html_table(model, data):
     <body>
         <div class="container">
             <h1>Female CEO and Return on Assets Analysis</h1>
-            <div class="subtitle">S&P 1500 Firms (2000-2010) - OLS Regression with Board Controls and Fixed Effects</div>
+            <div class="subtitle">S&P 1500 Firms (2000-2010) - Firm Fixed Effects Regression with Clustered Standard Errors</div>
             
             <div class="stats-summary">
                 <div class="stat-item">
@@ -875,8 +1150,8 @@ def create_pretty_html_table(model, data):
                 <tbody>
     """
     
-    # Add main variables
-    html += '<tr><td colspan="5" class="section-header">Main Variables</td></tr>'
+    # Add main variables (firm FE specification)
+    html += '<tr><td colspan="5" class="section-header">Main Variables (Within-Transformed)</td></tr>'
     for var in main_vars:
         if var in params.index:
             coef = params[var]
@@ -894,44 +1169,6 @@ def create_pretty_html_table(model, data):
                     </tr>
             """
     
-    # Add SIC variables
-    if sic_vars:
-        html += '<tr><td colspan="5" class="section-header">Industry Fixed Effects (SIC 1-digit)</td></tr>'
-        for var in sic_vars:
-            coef = params[var]
-            se = model.bse[var]
-            pval = pvalues[var]
-            ci_low, ci_high = conf_int.loc[var, 0], conf_int.loc[var, 1]
-            
-            html += f"""
-                    <tr>
-                        <td>{var_labels.get(var, var)}</td>
-                        <td class="coefficient">{format_coef(coef, pval)}</td>
-                        <td class="standard-error">{format_se(se)}</td>
-                        <td>{pval:.3f}</td>
-                        <td>[{ci_low:.3f}, {ci_high:.3f}]</td>
-                    </tr>
-            """
-    
-    # Add year variables
-    if year_vars:
-        html += '<tr><td colspan="5" class="section-header">Year Fixed Effects</td></tr>'
-        for var in year_vars:
-            coef = params[var]
-            se = model.bse[var]
-            pval = pvalues[var]
-            ci_low, ci_high = conf_int.loc[var, 0], conf_int.loc[var, 1]
-            
-            html += f"""
-                    <tr>
-                        <td>{var_labels.get(var, var)}</td>
-                        <td class="coefficient">{format_coef(coef, pval)}</td>
-                        <td class="standard-error">{format_se(se)}</td>
-                        <td>{pval:.3f}</td>
-                        <td>[{ci_low:.3f}, {ci_high:.3f}]</td>
-                    </tr>
-            """
-    
     html += """
                 </tbody>
             </table>
@@ -940,12 +1177,12 @@ def create_pretty_html_table(model, data):
                 <h3>Notes:</h3>
                 <ul>
                     <li><strong>Dependent Variable:</strong> Return on Assets (ROA)</li>
-                    <li><strong>Standard Errors:</strong> Heteroscedasticity-robust (HC3)</li>
+                    <li><strong>Standard Errors:</strong> Clustered by firm (gvkey)</li>
                     <li><strong>Significance Levels:</strong> * p&lt;0.1, ** p&lt;0.05, *** p&lt;0.01</li>
                     <li><strong>Sample:</strong> S&P 1500 firms (2000-2010) with complete data</li>
-                    <li><strong>Controls:</strong> Log Assets, Leverage, Board Size, Board Nationality Mix, Board Gender Ratio, CEO Tenure</li>
-                    <li><strong>Industry Controls:</strong> 1-digit SIC industry fixed effects</li>
-                    <li><strong>Time Controls:</strong> Year fixed effects (2000-2010)</li>
+                    <li><strong>Controls:</strong> Size (Log Assets), Leverage, Board Size, Board Nationality Mix, Board Gender Ratio, CEO Tenure</li>
+                    <li><strong>Fixed Effects:</strong> Firm fixed effects (absorbed via within-transformation)</li>
+                    <li><strong>Specification:</strong> Within-transformation removes all time-invariant firm characteristics</li>
                     <li><strong>Data Sources:</strong> Compustat, ExecuComp, BoardEx via WRDS</li>
                 </ul>
             </div>
@@ -990,47 +1227,31 @@ def data_quality_diagnostics(df):
     print(f"=" * 50)
 
 def run_regression(df):
-    """Run OLS with HC3 SEs and save outputs."""
-    # Core required columns (flexible about BoardEx data and ceo_tenure)
-    core_cols = ['roa','female_ceo','ln_assets','leverage','sic1','fyear']
-    optional_cols = ['board_size','nationality_mix','gender_ratio','ceo_tenure']
+    """Run firm fixed effects regression with within-transformation and clustered standard errors."""
+    import statsmodels.api as sm
+    
+    # Core required columns for firm FE
+    core_cols = ['roa', 'female_ceo', 'ln_assets', 'leverage', 'gvkey', 'fyear']
+    optional_cols = ['board_size', 'nationality_mix', 'gender_ratio', 'ceo_tenure']
+    
     print(f"DEBUG: Original dataset shape: {df.shape}")
     print(f"DEBUG: Available columns: {list(df.columns)}")
-    
-    # Comprehensive missing data diagnostics
-    print(f"DEBUG: === MISSING DATA DIAGNOSTICS ===")
-    for col in df.columns:
-        non_null_count = df[col].notna().sum()
-        missing_pct = (len(df) - non_null_count) / len(df) * 100
-        print(f"DEBUG: {col}: {non_null_count}/{len(df)} ({missing_pct:.1f}% missing)")
     
     # Check which core columns are available and have data
     available_core = [c for c in core_cols if c in df.columns]
     print(f"DEBUG: Available core columns: {available_core}")
     
-    # Check for missing values in core columns
-    for col in available_core:
-        non_null_count = df[col].notna().sum()
-        print(f"DEBUG: {col}: {non_null_count} non-null values out of {len(df)}")
-    
     # Check optional columns
     available_optional = [c for c in optional_cols if c in df.columns and df[c].notna().sum() > 0]
     print(f"DEBUG: Available optional columns with data: {available_optional}")
-    for col in available_optional:
-        non_null_count = df[col].notna().sum()
-        print(f"DEBUG: {col}: {non_null_count} non-null values out of {len(df)}")
     
-    # Only drop rows missing core required variables, not optional ones
-    # Don't require S&P 1500 flag since we want to keep all observations
-    core_cols_no_sp = [c for c in available_core if c != 'sp1500']
-    use = df.dropna(subset=core_cols_no_sp).copy()
-    print(f"DEBUG: After dropna (core only, excluding sp1500) shape: {use.shape}")
+    # Only drop rows missing core required variables (including gvkey for firm FE)
+    use = df.dropna(subset=available_core).copy()
+    print(f"DEBUG: After dropna (core only) shape: {use.shape}")
     
     # For optional variables, fill missing values with median or mean for continuous variables
-    # But first check if variables have sufficient variation
     for col in available_optional:
         if col in use.columns and use[col].notna().sum() > 0:
-            # Check if variable has sufficient variation (more than 1 unique value)
             unique_vals = use[col].nunique()
             if unique_vals <= 1:
                 print(f"DEBUG: Skipping {col} - only {unique_vals} unique value(s)")
@@ -1042,63 +1263,82 @@ def run_regression(df):
                 use[col] = use[col].fillna(use[col].mean())
             print(f"DEBUG: Filled missing values for {col} (unique values: {unique_vals})")
 
-    # Categorical FE
-    use['sic1'] = use['sic1'].astype('category')
-    use['fyear'] = use['fyear'].astype('Int64')
-
-    # Design matrix
-    import statsmodels.api as sm
-
-    # Use all available variables (core + optional with data)
-    available_vars = [c for c in ['female_ceo','ln_assets','leverage'] if c in use.columns]
-    
-    # Only add optional variables that have sufficient variation
-    for c in available_optional:
-        if c in use.columns and use[c].nunique() > 1:
-            available_vars.append(c)
-    
-    print(f"DEBUG: Using variables: {available_vars}")
-    
-    # Type hygiene before OLS - ensure key vars are numeric/clean
-    for c in ['female_ceo','ln_assets','leverage','board_size','nationality_mix','gender_ratio','ceo_tenure','roa']:
+    # Type hygiene - ensure key vars are numeric/clean
+    for c in ['female_ceo', 'ln_assets', 'leverage', 'board_size', 'nationality_mix', 'gender_ratio', 'ceo_tenure', 'roa']:
         if c in use.columns:
             use[c] = pd.to_numeric(use[c], errors='coerce')
-    print("DEBUG: Applied type hygiene to key variables")
     
-    X_core = use[available_vars].copy()
-    # Industry FE: drop_first=True drops the first SIC1 category as reference
-    # This will be SIC1=0 or the first alphabetical category (likely SIC1=1)
-    sic_dum = pd.get_dummies(use['sic1'], prefix='sic1', drop_first=True)
-    year_dum = pd.get_dummies(use['fyear'].astype(int), prefix='year', drop_first=True)
-
-    X = pd.concat([X_core, sic_dum, year_dum], axis=1)
-    y = use['roa']
-    X = sm.add_constant(X)
-
-    # Clean data types for regression
-    print(f"DEBUG: X dtypes before cleaning: {X.dtypes}")
-    print(f"DEBUG: y dtype before cleaning: {y.dtype}")
+    # Rename variables to match specification
+    use = use.rename(columns={
+        'ln_assets': 'size',
+        'gender_ratio': 'board_gender_ratio'
+    })
     
-    # Convert boolean columns to int first, then to numeric
-    for col in X.columns:
-        if X[col].dtype == 'boolean' or X[col].dtype == 'bool':
-            X[col] = X[col].astype(int)
+    # Check BoardEx coverage after merge
+    print("DEBUG: BoardEx coverage after merge:")
+    boardex_cols = ['board_size', 'nationality_mix', 'board_gender_ratio']
+    for col in boardex_cols:
+        if col in use.columns:
+            coverage = use[col].notna().mean()
+            print(f"DEBUG: {col}: {coverage:.1%} coverage")
     
-    # Convert to standard numpy types
+    # Prepare variables for within-transformation (firm FE)
+    within_vars = ['female_ceo', 'size', 'leverage']  # core
+    
+    # Add BoardEx/tenure if they vary within firm (using renamed columns)
+    candidate_vars = ['board_size', 'nationality_mix', 'board_gender_ratio', 'ceo_tenure']
+    for v in candidate_vars:
+        if v in use.columns:
+            # Check within-firm variation more carefully
+            varies = use.groupby('gvkey')[v].nunique(dropna=True).gt(1).any()
+            if varies:
+                within_vars.append(v)
+                print(f"DEBUG: Including {v} (has within-firm variation)")
+            else:
+                print(f"DEBUG: {v} has no within-firm variation; FE absorbs it (dropping)")
+    
+    print(f"DEBUG: Variables for within-transformation: {within_vars}")
+    
+    # Within-transformation: subtract firm means
+    use_within = use.copy()
+    
+    # Calculate firm means for each variable
+    firm_means = use.groupby('gvkey')[within_vars + ['roa']].mean()
+    
+    # Subtract firm means from each observation
+    for var in within_vars + ['roa']:
+        if var in use.columns:
+            use_within[f'{var}_demeaned'] = use[var] - use['gvkey'].map(firm_means[var])
+    
+    # Drop rows with any NaN values after within-transformation
+    demeaned_vars = [f'{var}_demeaned' for var in within_vars]
+    use_final = use_within.dropna(subset=demeaned_vars + ['roa_demeaned']).copy()
+    
+    print(f"DEBUG: After within-transformation and dropna: {use_final.shape}")
+    
+    # Prepare regression data (demeaned only; FE model)
+    X = use_final[demeaned_vars].copy()
+    y = use_final['roa_demeaned'].copy()
+    
+    # No constant after within transform (it would be ~0 and redundant)
+    
+    # Clean data types
     X = X.astype(float)
     y = y.astype(float)
     
-    print(f"DEBUG: X dtypes after cleaning: {X.dtypes}")
-    print(f"DEBUG: y dtype after cleaning: {y.dtype}")
+    # Get cluster variable (gvkey)
+    clusters = use_final['gvkey'].astype(str)
     
-    # Drop rows with any NaN values
-    valid_mask = ~(X.isna().any(axis=1) | y.isna())
-    X = X[valid_mask]
-    y = y[valid_mask]
+    # Sanity checks
+    n_obs = len(X)
+    n_clusters = clusters.nunique()
+    print(f"[Firm FE] N (obs) = {n_obs} | clusters (gvkey) = {n_clusters}")
     
-    print(f"DEBUG: Running regression with {len(X)} observations")
+    # Run regression with clustered standard errors
+    print(f"DEBUG: Running firm FE regression with {n_obs} observations and {n_clusters} clusters")
     print(f"DEBUG: Final X shape: {X.shape}, y shape: {y.shape}")
-    model = sm.OLS(y, X, missing='drop').fit(cov_type='HC3')
+    
+    model = sm.OLS(y, X, missing='drop').fit(cov_type='cluster', cov_kwds={'groups': clusters})
 
     # Save textual summary
     txt_path = OUTDIR / "reg_femaleCEO_roa.txt"
@@ -1109,12 +1349,12 @@ def run_regression(df):
     try:
         html_path = OUTDIR / "reg_femaleCEO_roa.html"
         with open(html_path, "w") as f:
-            f.write(create_pretty_html_table(model, use))
+            f.write(create_pretty_html_table(model, use_final))
     except Exception as e:
         print(f"WARNING: Could not save HTML summary: {e}")
         html_path = None
 
-    return model, use, X, y
+    return model, use_final, X, y
 
 
 def export_data(df):
@@ -1203,11 +1443,11 @@ def main():
     print(f"DEBUG: wrds_dict keys: {list(wrds_dict.keys())}")
     print(f"DEBUG: wrds_dict comp shape: {wrds_dict.get('comp', pd.DataFrame()).shape}")
     print("DEBUG: Coalescing data sources...")
-    comp, execu, link, bx, prof, bx_stocks, sp1500 = coalesce_sources(wrds_dict)
+    comp, execu, execu_person, execu_roles, execu_company, link, bx, prof, bx_stocks, sp1500 = coalesce_sources(wrds_dict)
     print("DEBUG: Data sources coalesced successfully")
 
     # 2) Merge & construct variables
-    df = build_and_merge(comp, execu, link, bx, prof, bx_stocks)
+    df = build_and_merge(comp, execu, execu_person, execu_roles, execu_company, link, bx, prof, bx_stocks)
     df = construct_vars(df)
 
     # 3) Filter to S&P1500 (if provided) and 2000–2010
