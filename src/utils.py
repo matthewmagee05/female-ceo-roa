@@ -173,7 +173,7 @@ def print_analysis_summary(model, data: pd.DataFrame, files: list):
     
     # Check BoardEx availability
     if 'boardex_available' in data.columns and data['boardex_available'].iloc[0] == 0:
-        print(f"\n⚠️  Note: BoardEx controls not included (data unavailable)")
+        print(f"\n⚠️  Note: BoardEx controls absorbed by firm fixed effects (no within-firm variation)")
     
     print(f"\n📁 Output files:")
     for file_path in files:

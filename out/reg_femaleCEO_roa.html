@@ -14,35 +14,34 @@
         <body>
             <h1>Female CEO and Return on Assets Analysis</h1>
             <p><strong>Sample:</strong> S&P 1500 firms (2000-2010)</p>
-            <p><strong>Observations:</strong> 7,017</p>
-            <p><strong>Firms:</strong> 814</p>
-            <p><strong>R-squared:</strong> 0.056</p>
+            <p><strong>Observations:</strong> 6,921</p>
+            <p><strong>Firms:</strong> 802</p>
+            <p><strong>R-squared:</strong> 0.055</p>
             <p><strong>Adjusted R-squared:</strong> 0.055</p>
             
             <h2>Regression Results</h2>
             <pre>                                 OLS Regression Results                                
 =======================================================================================
-Dep. Variable:           roa_demeaned   R-squared (uncentered):                   0.056
+Dep. Variable:           roa_demeaned   R-squared (uncentered):                   0.055
 Model:                            OLS   Adj. R-squared (uncentered):              0.055
-Method:                 Least Squares   F-statistic:                              30.63
-Date:                Tue, 09 Sep 2025   Prob (F-statistic):                    8.93e-24
-Time:                        21:41:55   Log-Likelihood:                          11368.
-No. Observations:                7017   AIC:                                 -2.273e+04
-Df Residuals:                    7013   BIC:                                 -2.270e+04
-Df Model:                           4                                                  
+Method:                 Least Squares   F-statistic:                              37.71
+Date:                Wed, 10 Sep 2025   Prob (F-statistic):                    8.45e-23
+Time:                        14:13:29   Log-Likelihood:                          11165.
+No. Observations:                6921   AIC:                                 -2.232e+04
+Df Residuals:                    6918   BIC:                                 -2.230e+04
+Df Model:                           3                                                  
 Covariance Type:              cluster                                                  
 =======================================================================================
                           coef    std err          z      P>|z|      [0.025      0.975]
 ---------------------------------------------------------------------------------------
-female_ceo_demeaned    -0.0008      0.010     -0.081      0.935      -0.020       0.019
-size_demeaned          -0.0010      0.003     -0.391      0.696      -0.006       0.004
-leverage_demeaned      -0.1647      0.015    -10.886      0.000      -0.194      -0.135
-ceo_tenure_demeaned     0.0002      0.000      1.177      0.239      -0.000       0.001
+female_ceo_demeaned     0.0010      0.011      0.095      0.925      -0.020       0.023
+size_demeaned          -0.0011      0.003     -0.437      0.662      -0.006       0.004
+leverage_demeaned      -0.1654      0.016    -10.466      0.000      -0.196      -0.134
 ==============================================================================
-Omnibus:                     2434.129   Durbin-Watson:                   1.598
-Prob(Omnibus):                  0.000   Jarque-Bera (JB):            28065.049
-Skew:                          -1.326   Prob(JB):                         0.00
-Kurtosis:                      12.432   Cond. No.                         57.8
+Omnibus:                     2349.868   Durbin-Watson:                   1.574
+Prob(Omnibus):                  0.000   Jarque-Bera (JB):            26757.183
+Skew:                          -1.294   Prob(JB):                         0.00
+Kurtosis:                      12.278   Cond. No.                         5.02
 ==============================================================================
 
 Notes:

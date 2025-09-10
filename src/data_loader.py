@@ -97,46 +97,127 @@ class WRDSDataLoader:
             except Exception as e:
                 print(f"DEBUG: {schema}.sp1500list failed: {e}")
 
-        # Use comp.indexcst_his with S&P 1500 gvkey (031855) - more comprehensive
-        print("DEBUG: Using comp.indexcst_his with S&P 1500 gvkey...")
+        # Try comp.index_members for S&P 500, 400, 600 constituents with robust name matching
+        print("DEBUG: Trying comp.index_members for S&P 500+400+600 with robust name matching...")
         try:
             query = f'''
-                SELECT DISTINCT gvkey, 
-                       EXTRACT(YEAR FROM fromdate) as start_year,
-                       EXTRACT(YEAR FROM thrudate) as end_year
-                FROM comp.indexcst_his 
-                WHERE gvkeyx = '031855'
-                AND fromdate <= '{years[1]}-12-31' 
-                AND (thrudate IS NULL OR thrudate >= '{years[0]}-01-01')
+                SELECT DISTINCT gvkey,
+                       fromdate,
+                       thrudate
+                FROM comp.index_members
+                WHERE upper(indexname) SIMILAR TO
+                      '(S&P.*500)|(S&P.*MID.*400)|(S&P.*SMALL.*600)'
+                  AND fromdate <= '{years[1]}-12-31'
+                  AND (thrudate IS NULL OR thrudate >= '{years[0]}-01-01')
             '''
             
             result = self.conn.raw_sql(query, coerce_float=True)
             
             if not result.empty:
-                # Build firm-year membership
+                # Expand by fiscal year (FY end on Dec 31 is fine for 2000–2010)
+                result['fromdate'] = pd.to_datetime(result['fromdate'], errors='coerce')
+                result['thrudate'] = pd.to_datetime(result['thrudate'], errors='coerce').fillna(pd.Timestamp('2099-12-31'))
                 years_arr = np.arange(years[0], years[1] + 1)
                 rows = []
                 
-                for _, row in result.iterrows():
-                    gvkey = str(row['gvkey'])
-                    start_year = int(row['start_year']) if pd.notna(row['start_year']) else years[0]
-                    end_year = int(row['end_year']) if pd.notna(row['end_year']) else years[1]
-                    
-                    for year in years_arr:
-                        if start_year <= year <= end_year:
-                            rows.append((gvkey, year))
+                for _, r in result.iterrows():
+                    for y in years_arr:
+                        fy_end = pd.Timestamp(f"{y}-12-31")
+                        if r['fromdate'] <= fy_end <= r['thrudate']:
+                            rows.append((str(r['gvkey']), int(y)))
                 
                 sp1500 = pd.DataFrame(rows, columns=["gvkey","fyear"]).drop_duplicates()
-                print(f"[SP1500] using comp.indexcst_his (S&P 1500 gvkey) | firm-years={len(sp1500)} | firms={sp1500['gvkey'].nunique()}")
+                print(f"[SP1500] using comp.index_members (robust names) | firm-years={len(sp1500)} | firms={sp1500['gvkey'].nunique()}")
                 return sp1500
             else:
-                print("DEBUG: No firms found in comp.indexcst_his for S&P 1500")
+                print("DEBUG: No firms found in comp.index_members for S&P 500+400+600")
                 
         except Exception as e:
-            print(f"DEBUG: comp.indexcst_his failed: {e}")
-
-        # No fallbacks - only use curated S&P 1500 lists
+            print(f"DEBUG: comp.index_members failed: {e}")
+        
+        # Fallback: Use robust S&P 1500 builder from comp.idxcst_his
+        print("DEBUG: Using robust S&P 1500 builder from comp.idxcst_his...")
+        try:
+            sp1500 = self._build_sp1500_firmyears_from_idxcst(years)
+            return sp1500
+        except Exception as e:
+            print(f"DEBUG: Robust S&P 1500 builder failed: {e}")
+        
+        # No more fallbacks - only use curated S&P 1500 lists
         raise RuntimeError("Could not build S&P1500 membership from curated list tables (comp/compm.sp1500list).")
+    
+    def _build_sp1500_firmyears_from_idxcst(self, years: Tuple[int, int] = (2000, 2010)) -> pd.DataFrame:
+        """
+        Robust SP1500 firm-year builder using comp.idxcst_his and index gvkeys.
+        Works even when indexid/indexname tables aren't available.
+        Returns columns: gvkey (str), fyear (int)
+        """
+        SP_IDS = ['031855','000003','000011','000012']  # SP1500, SP500, SP400, SP600
+        
+        # 1) Pull a tiny sample to detect column names
+        samp = self.conn.raw_sql("select * from comp.idxcst_his limit 1", coerce_float=True)
+        cols = {c.lower(): c for c in samp.columns}
+
+        # Detect index key and date columns
+        idx_key = None
+        for cand in ['indexgvkey', 'gvkeyx', 'index_gvkey', 'igvkey', 'idx_gvkey']:
+            if cand in cols:
+                idx_key = cols[cand]
+                break
+        if not idx_key:
+            raise RuntimeError("comp.idxcst_his has no recognizable index key (tried indexgvkey/gvkeyx/index_gvkey/igvkey/idx_gvkey).")
+
+        from_col = cols.get('from') or cols.get('fromdate')
+        thru_col = cols.get('thru') or cols.get('thrudate')
+        if not from_col or not thru_col:
+            # Load with explicit aliases to be safe
+            q = f'''
+                select gvkey,
+                       {idx_key} as idxkey,
+                       "from" as from_date,
+                       "thru"  as thru_date
+                from comp.idxcst_his
+                where {idx_key} in ({",".join("'" + i + "'" for i in SP_IDS)})
+            '''
+            mem = self.conn.raw_sql(q, coerce_float=True)
+            from_name, thru_name = 'from_date', 'thru_date'
+        else:
+            q = f'''
+                select gvkey,
+                       {idx_key} as idxkey,
+                       "{from_col}" as from_date,
+                       "{thru_col}" as thru_date
+                from comp.idxcst_his
+                where {idx_key} in ({",".join("'" + i + "'" for i in SP_IDS)})
+            '''
+            mem = self.conn.raw_sql(q, coerce_float=True)
+            from_name, thru_name = 'from_date', 'thru_date'
+
+        if mem is None or mem.empty:
+            raise RuntimeError("idxcst_his returned 0 rows for S&P index gvkeys; check schema or permissions.")
+
+        # 2) Clean & expand to firm-years
+        mem['gvkey'] = mem['gvkey'].astype(str)
+        mem[from_name] = pd.to_datetime(mem[from_name], errors='coerce')
+        mem[thru_name] = pd.to_datetime(mem[thru_name], errors='coerce').fillna(pd.Timestamp('2099-12-31'))
+        mem = mem.dropna(subset=['gvkey', from_name])
+
+        y0, y1 = years
+        years_arr = np.arange(y0, y1 + 1)
+        rows = []
+        for _, r in mem.iterrows():
+            for y in years_arr:
+                fy_end = pd.Timestamp(f"{y}-12-31")
+                if r[from_name] <= fy_end <= r[thru_name]:
+                    rows.append((r['gvkey'], int(y)))
+        sp1500_fy = pd.DataFrame(rows, columns=['gvkey', 'fyear']).drop_duplicates()
+
+        # 3) Sanity prints
+        print(f"[SP1500] firm-years={len(sp1500_fy)} | firms={sp1500_fy['gvkey'].nunique()} | years {sp1500_fy['fyear'].min()}–{sp1500_fy['fyear'].max()}")
+        if sp1500_fy.empty:
+            raise RuntimeError("Expanded SP1500 firm-year table is empty; check date columns and index gvkeys.")
+
+        return sp1500_fy
     
     
     
@@ -179,7 +260,15 @@ class WRDSDataLoader:
             return execu
         except Exception as e:
             print(f"DEBUG: comp_execucomp.anncomp failed: {e}")
-            return pd.DataFrame()
+            try:
+                execu = self.conn.get_table('execucomp', 'anncomp',
+                                          columns=['gvkey', 'year', 'ceoann', 'gender', 'becameceo', 'execid', 'coname'],
+                                          coerce_float=True)
+                print(f"DEBUG: Pulled {len(execu)} rows from execucomp.anncomp")
+                return execu
+            except Exception as e2:
+                print(f"DEBUG: execucomp.anncomp also failed: {e2}")
+                return pd.DataFrame()
     
     def load_company_data(self) -> pd.DataFrame:
         """Load Compustat company data for SIC codes."""
