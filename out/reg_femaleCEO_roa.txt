@@ -1,26 +1,26 @@
                                  OLS Regression Results                                
 =======================================================================================
-Dep. Variable:           roa_demeaned   R-squared (uncentered):                   0.001
-Model:                            OLS   Adj. R-squared (uncentered):              0.001
-Method:                 Least Squares   F-statistic:                             0.8238
-Date:                Tue, 09 Sep 2025   Prob (F-statistic):                       0.510
-Time:                        20:20:02   Log-Likelihood:                         -15809.
-No. Observations:               21259   AIC:                                  3.163e+04
-Df Residuals:                   21255   BIC:                                  3.166e+04
+Dep. Variable:           roa_demeaned   R-squared (uncentered):                   0.056
+Model:                            OLS   Adj. R-squared (uncentered):              0.055
+Method:                 Least Squares   F-statistic:                              30.63
+Date:                Tue, 09 Sep 2025   Prob (F-statistic):                    8.93e-24
+Time:                        21:41:55   Log-Likelihood:                          11368.
+No. Observations:                7017   AIC:                                 -2.273e+04
+Df Residuals:                    7013   BIC:                                 -2.270e+04
 Df Model:                           4                                                  
 Covariance Type:              cluster                                                  
 =======================================================================================
                           coef    std err          z      P>|z|      [0.025      0.975]
 ---------------------------------------------------------------------------------------
-female_ceo_demeaned    -0.0102      0.015     -0.673      0.501      -0.040       0.020
-size_demeaned          -0.0173      0.076     -0.228      0.820      -0.166       0.131
-leverage_demeaned      -0.1256      0.081     -1.558      0.119      -0.283       0.032
-ceo_tenure_demeaned     0.0002      0.001      0.158      0.874      -0.002       0.002
+female_ceo_demeaned    -0.0008      0.010     -0.081      0.935      -0.020       0.019
+size_demeaned          -0.0010      0.003     -0.391      0.696      -0.006       0.004
+leverage_demeaned      -0.1647      0.015    -10.886      0.000      -0.194      -0.135
+ceo_tenure_demeaned     0.0002      0.000      1.177      0.239      -0.000       0.001
 ==============================================================================
-Omnibus:                    62993.119   Durbin-Watson:                   2.226
-Prob(Omnibus):                  0.000   Jarque-Bera (JB):      10497490576.129
-Skew:                          41.946   Prob(JB):                         0.00
-Kurtosis:                    3444.501   Cond. No.                         44.7
+Omnibus:                     2434.129   Durbin-Watson:                   1.598
+Prob(Omnibus):                  0.000   Jarque-Bera (JB):            28065.049
+Skew:                          -1.326   Prob(JB):                         0.00
+Kurtosis:                      12.432   Cond. No.                         57.8
 ==============================================================================
 
 Notes:

@@ -1,310 +1,233 @@
-# Female CEO and ROA Analysis
+# Female CEO ROA Analysis
 
-This project analyzes the relationship between female CEOs and firm performance (ROA) using S&P 1500 firms from 2000-2010, with comprehensive controls including board characteristics and CEO tenure.
+A modular, well-tested analysis of the relationship between female CEOs and firm performance (ROA) using S&P 1500 firms from 2000-2010, with comprehensive controls including board characteristics and CEO tenure.
 
-## 📊 Analysis Overview
+## 🏗️ Architecture
 
-- **Research Question**: Do female CEOs affect firm performance (ROA)?
-- **Sample**: S&P 1500 firms, 2000-2010
-- **Methodology**: OLS regression with robust standard errors (HC3)
-- **Controls**: Firm size, leverage, board characteristics, CEO tenure, industry FE, year FE
-- **Data Sources**: Compustat, ExecuComp, BoardEx, S&P index constituents
+The code has been refactored into modular components:
+
+```
+src/
+├── __init__.py          # Package initialization
+├── data_loader.py       # WRDS and local data loading
+├── analysis.py          # Data processing and regression analysis
+└── utils.py            # Utility functions and configuration
+
+tests/
+├── __init__.py
+├── test_data_loader.py  # Tests for data loading
+├── test_analysis.py     # Tests for analysis functions
+├── test_utils.py        # Tests for utility functions
+└── test_integration.py  # Integration tests
+
+female_ceo_roa.py  # Main analysis script
+```
 
 ## 🚀 Quick Start
 
-### Super Quick Start (3 steps)
+### 1. Setup
 
-1. **Download this repository**
-2. **Run setup script:**
-   - Windows: Double-click `setup.bat`
-   - macOS/Linux: Run `./setup.sh`
-3. **Run analysis:** `python female_ceo_roa.py`
-
-### Prerequisites
-
-1. **Python 3.9+** installed on your system
-2. **WRDS Account** with access to:
-   - Compustat (comp)
-   - ExecuComp (comp_execucomp) 
-   - BoardEx (boardex_na)
-   - CRSP (crsp_a_indexes, crsp_a_ccm)
-
-### Installation
-
-#### Option 1: Automated Setup (Recommended)
-
-**On Windows:**
 ```bash
-# Download/clone the repository, then:
-setup.bat
+# Install dependencies
+make setup
+
+# Or manually:
+pip install -r requirements.txt
+pip install -r requirements-test.txt
 ```
 
-**On macOS/Linux:**
-```bash
-# Download/clone the repository, then:
-./setup.sh
-```
-
-**Or run the Python setup script directly:**
-```bash
-python setup.py
-```
-
-#### Option 2: Manual Setup
-
-1. **Clone or download this repository**
-   ```bash
-   git clone <repository-url>
-   cd female-ceo-roa
-   ```
-
-2. **Create a virtual environment**
-   ```bash
-   python -m venv .venv
-   ```
-
-3. **Activate the virtual environment**
-   
-   **On Windows:**
-   ```bash
-   .venv\Scripts\activate
-   ```
-   
-   **On macOS/Linux:**
-   ```bash
-   source .venv/bin/activate
-   ```
-
-4. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-### WRDS Setup
-
-1. **Set up WRDS credentials** (choose one method):
-
-   **Method A: Environment Variables**
-   ```bash
-   export WRDS_USERNAME="your_username"
-   export WRDS_PASSWORD="your_password"
-   ```
-
-   **Method B: .pgpass file** (recommended)
-   ```bash
-   # The script will prompt you to create this automatically
-   # Or create manually: ~/.pgpass with format:
-   # hostname:port:database:username:password
-   ```
-
-2. **Test WRDS connection**
-   ```bash
-   python -c "import wrds; conn = wrds.Connection(); print('WRDS connection successful!')"
-   ```
-
-### Run the Analysis
-
-#### Option 1: Using Run Scripts (Easiest)
-
-**On Windows:**
-```bash
-run_analysis.bat
-```
-
-**On macOS/Linux:**
-```bash
-./run_analysis.sh
-```
-
-#### Option 2: Manual Run
-
-**On Windows:**
-```bash
-.venv\Scripts\python female_ceo_roa.py
-```
-
-**On macOS/Linux:**
-```bash
-.venv/bin/python female_ceo_roa.py
-```
-
-#### Option 3: With Virtual Environment Activated
+### 2. Run Analysis
 
 ```bash
-# Activate virtual environment first
-# Windows: .venv\Scripts\activate
-# macOS/Linux: source .venv/bin/activate
+# Run the analysis
+make run
 
+# Or directly:
 python female_ceo_roa.py
 ```
 
-## 📁 Project Structure
+### 3. Run Tests
 
-```
-female-ceo-roa/
-├── README.md                           # This file
-├── requirements.txt                    # Python dependencies
-├── female_ceo_roa.py                  # Main analysis script
-├── setup.py                           # Automated setup script
-├── setup.bat                          # Windows setup script
-├── setup.sh                           # macOS/Linux setup script
-├── run_analysis.bat                   # Windows run script
-├── run_analysis.sh                    # macOS/Linux run script
-├── data/                              # Local data storage (if needed)
-└── out/                               # Analysis outputs
-    ├── reg_femaleCEO_roa.html         # Beautiful HTML regression table
-    ├── reg_femaleCEO_roa.txt          # Text regression results
-    ├── sp1500_femaleCEO_2000_2010.csv # Final dataset (CSV)
-    └── sp1500_femaleCEO_2000_2010.dta # Final dataset (Stata)
-```
-
-## 📊 Expected Outputs
-
-### 1. Console Output
-- Data pull progress and diagnostics
-- Sample size information
-- Missing data analysis
-- Regression results summary
-
-### 2. Files Generated
-- **HTML Table**: Professional regression results with formatting
-- **Text Results**: Standard regression output
-- **CSV Dataset**: Final analysis dataset
-- **Stata Dataset**: For use in Stata/econometric software
-
-### 3. Key Results
-- **Sample Size**: ~331 firm-year observations
-- **Female CEO Effect**: Coefficient and significance
-- **Controls**: All requested board and firm characteristics
-- **Model Fit**: R-squared and diagnostic statistics
-
-## 🔧 Troubleshooting
-
-### Common Issues
-
-**1. WRDS Connection Failed**
-```
-Error: PAM authentication failed
-```
-**Solution**: 
-- Verify your WRDS username/password
-- Check if your WRDS account has access to required databases
-- Try creating a .pgpass file manually
-
-**2. Module Not Found**
-```
-ModuleNotFoundError: No module named 'pandas'
-```
-**Solution**:
 ```bash
-pip install -r requirements.txt
+# Run all tests
+make test
+
+# Run unit tests only
+make test-unit
+
+# Run integration tests only
+make test-integration
+
+# Run tests with coverage
+make test-cov
 ```
 
-**3. Permission Denied**
+## 📊 Key Improvements
+
+### 1. **Modular Design**
+- **Data Loading**: Separated WRDS and local data loading logic
+- **Analysis**: Isolated data processing and regression analysis
+- **Utilities**: Centralized configuration and helper functions
+
+### 2. **Comprehensive Testing**
+- **Unit Tests**: Test individual components in isolation
+- **Integration Tests**: Test complete pipeline end-to-end
+- **Mocking**: Proper mocking of external dependencies (WRDS)
+- **Coverage**: Track test coverage for quality assurance
+
+### 3. **Better Error Handling**
+- Graceful handling of missing data
+- Clear error messages and warnings
+- Robust fallback mechanisms
+
+### 4. **Configuration Management**
+- Environment variable support
+- Centralized configuration
+- Easy customization of parameters
+
+### 5. **Code Quality**
+- Type hints for better IDE support
+- Docstrings for all functions and classes
+- Consistent naming conventions
+- Separation of concerns
+
+## 🔧 Configuration
+
+The refactored version supports configuration through environment variables:
+
+```bash
+# WRDS Configuration
+export USE_WRDS=True
+export WRDS_USERNAME=your_username
+
+# Email Configuration (optional)
+export EMAIL_ENABLE=True
+export EMAIL_SMTP_HOST=smtp.gmail.com
+export EMAIL_SMTP_PORT=587
+export EMAIL_FROM=your_email@example.com
+export EMAIL_TO=professor@example.edu
+export EMAIL_USER=your_email@example.com
+export EMAIL_APP_PASSWORD=your_app_password
 ```
-PermissionError: [Errno 13] Permission denied
+
+## 📈 Usage Examples
+
+### Basic Analysis
+
+```python
+from src import load_all_data, DataProcessor, RegressionAnalyzer
+
+# Load data
+data = load_all_data(use_wrds=True, years=(2000, 2010))
+
+# Process data
+processor = DataProcessor()
+comp = processor.enrich_compustat(data['comp'], data['company'])
+df = processor.merge_datasets(comp, data['execu'], ...)
+df = processor.construct_variables(df)
+df = processor.apply_filters(df, data['sp1500'])
+
+# Run regression
+analyzer = RegressionAnalyzer()
+model, used_data, X, y = analyzer.run_firm_fixed_effects_regression(df)
 ```
-**Solution**:
-- Ensure you have write permissions in the project directory
-- Try running with administrator/sudo privileges if needed
 
-**4. Sample Size Too Small**
+### Custom Configuration
+
+```python
+from src.utils import get_config, setup_output_directory
+
+# Get configuration
+config = get_config()
+config['years'] = (2005, 2015)  # Custom years
+
+# Setup custom output directory
+outdir = setup_output_directory("custom_output")
 ```
-DEBUG: Running regression with 0 observations
+
+## 🧪 Testing
+
+The test suite includes:
+
+### Unit Tests
+- **Data Loading**: Test WRDS connection, local file loading
+- **Data Processing**: Test variable construction, filtering
+- **Analysis**: Test regression pipeline, within-transformation
+- **Utilities**: Test configuration, export functions
+
+### Integration Tests
+- **Complete Pipeline**: End-to-end analysis with mock data
+- **Error Handling**: Test graceful failure modes
+- **Data Export**: Test CSV and Stata export functionality
+
+### Running Tests
+
+```bash
+# Run specific test file
+pytest tests/test_data_loader.py -v
+
+# Run tests with coverage
+pytest tests/ --cov=src --cov-report=html
+
+# Run only fast tests
+pytest tests/ -m "not slow"
 ```
-**Solution**:
-- Check WRDS data availability
-- Verify your account has access to all required databases
-- The script includes fallback mechanisms for missing data
 
-### Data Availability Issues
+## 📁 Output Files
 
-**Limited BoardEx Coverage**
-- BoardEx data linking is complex and may have low coverage
-- The analysis handles this gracefully by including controls where available
-- This is normal and expected for BoardEx data
+The refactored version generates the same output files as the original:
 
-**S&P 1500 Filtering**
-- Uses S&P 500 as proxy when S&P 1500 data is limited
-- Includes comprehensive diagnostics to show what data is available
+- `out/sp1500_femaleCEO_2000_2010.csv` - Analysis dataset
+- `out/sp1500_femaleCEO_2000_2010.dta` - Stata format
+- `out/reg_femaleCEO_roa.txt` - Regression results (text)
+- `out/reg_femaleCEO_roa.html` - Regression results (HTML)
+- `out/female_ceo_roa.py` - Script copy
 
-## 📈 Understanding the Results
+## 🔄 Migration from Original
 
-### Regression Output
-- **female_ceo**: Main variable of interest (coefficient and p-value)
-- **ln_assets**: Firm size control (log of total assets)
-- **leverage**: Financial leverage control (debt/assets)
-- **board_size**: Board size control (where available)
-- **ceo_tenure**: CEO tenure in years (where available)
-- **sic1_***: Industry fixed effects (SIC 1-digit)
-- **year_***: Year fixed effects (2001-2010)
+The refactored version maintains the same functionality as the original script but with improved:
 
-### Key Diagnostics
-- **R-squared**: Model explanatory power
-- **F-statistic**: Overall model significance
-- **Skewness/Kurtosis**: ROA distribution characteristics
-- **Condition Number**: Multicollinearity indicator
+1. **Code Organization**: Modular structure for easier maintenance
+2. **Testing**: Comprehensive test coverage for reliability
+3. **Error Handling**: Better error messages and recovery
+4. **Documentation**: Clear docstrings and type hints
+5. **Configuration**: Environment variable support
 
-## 🎯 Interpretation Guidelines
+## 🛠️ Development
 
-### Female CEO Coefficient
-- **Positive**: Female CEOs associated with higher ROA
-- **Negative**: Female CEOs associated with lower ROA
-- **Not Significant**: No detectable effect (still a valid result)
+### Adding New Features
 
-### Sample Limitations
-- **Small Sample**: Due to data availability constraints
-- **BoardEx Coverage**: Low but included where available
-- **Time Period**: 2000-2010 (historical data)
+1. **Data Sources**: Add new data loaders in `src/data_loader.py`
+2. **Analysis Methods**: Add new analysis functions in `src/analysis.py`
+3. **Utilities**: Add helper functions in `src/utils.py`
+4. **Tests**: Add corresponding tests in `tests/`
 
-## 🔬 Methodology Notes
+### Code Style
 
-### Data Processing
-- **Winsorization**: ROA values capped at 1st/99th percentiles
-- **Robust Standard Errors**: HC3 to handle heteroscedasticity
-- **Missing Data**: Handled through appropriate imputation and exclusion
+- Use type hints for all function parameters and returns
+- Add docstrings for all public functions and classes
+- Follow PEP 8 style guidelines
+- Write tests for new functionality
 
-### Variable Construction
-- **ROA**: Net Income / Total Assets
-- **Female CEO**: Binary indicator from ExecuComp
-- **CEO Tenure**: Current year - CEO start year
-- **Board Controls**: From BoardEx (where available)
+## 📋 Available Commands
 
-## 📚 Dependencies
-
-See `requirements.txt` for complete list. Key packages:
-- `pandas`: Data manipulation
-- `numpy`: Numerical computing
-- `statsmodels`: Statistical modeling
-- `wrds`: WRDS database access
-- `psycopg2`: PostgreSQL connection
+```bash
+make help              # Show all available commands
+make setup             # Install all dependencies
+make test              # Run all tests
+make test-cov          # Run tests with coverage
+make run              # Run the analysis
+make clean             # Clean up generated files
+```
 
 ## 🤝 Contributing
 
 1. Fork the repository
 2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
+3. Add tests for new functionality
+4. Ensure all tests pass
 5. Submit a pull request
 
 ## 📄 License
 
-This project is for academic/research purposes. Please cite appropriately if used in research.
-
-## 🆘 Support
-
-For issues related to:
-- **WRDS Access**: Contact WRDS support
-- **Data Questions**: Check WRDS documentation
-- **Code Issues**: Open an issue in this repository
-
-## 📖 References
-
-- WRDS Documentation: https://wrds-www.wharton.upenn.edu/
-- Compustat Manual: Available through WRDS
-- ExecuComp Manual: Available through WRDS
-- BoardEx Documentation: Available through WRDS
-
----
-
-**Note**: This analysis requires active WRDS subscription and appropriate database access. Results may vary based on data availability and access permissions.
+Same as the original project.
